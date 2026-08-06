@@ -1,0 +1,15 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_pose_appearance20_road_street1_smoke40.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-pose-fullres-smoke40"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-pose-fullres-smoke40"
+
+Mapper:
+  post_refinement:
+    pose_prepass_steps: 40
+    pose_prepass_level: 0
+    pose_prepass_batch_size: 4
+    pose_prepass_lr: 0.00001
+    pose_prepass_frequency_weight: 0.50

@@ -1,0 +1,14 @@
+inherit_from: "configs/aerocommit/npo_gate_road_street1_smoke20.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-npo-gate"
+  end_cutoff: 0
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-npo-gate"
+  end_cutoff: 0
+
+Mapper:
+  post_refinement:
+    max_steps: 1000
+    opt_cam: false

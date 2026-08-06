@@ -1,0 +1,69 @@
+inherit_from: "configs/aria/orb_tracking/aria_base.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-orb-persistent-fine-v1"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_HorizonGS/road_street1_orb_persistent_fine_v1"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 0
+  max_pts_num: 10000
+  vignette: False
+  use_vignette_type: "post-render"
+  Calibration:
+    fx: 619.886262
+    fy: 619.886262
+    cx: 808.910311
+    cy: 446.748666
+    width: 1600
+    height: 896
+    near: 0.01
+    far: 1000
+
+Testset:
+  name: "HorizonGS-road-street1-orb-persistent-fine-v1"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_HorizonGS/road_street1_orb_persistent_fine_v1"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 0
+  max_pts_num: 10000
+  vignette: False
+  use_vignette_type: "post-render"
+  Calibration:
+    fx: 619.886262
+    fy: 619.886262
+    cx: 808.910311
+    cy: 446.748666
+    width: 1600
+    height: 896
+    near: 0.01
+    far: 1000
+
+Results:
+  save_dir: "./Logs_horizongs"
+  save_gt: False
+  save_exr: False
+  save_mesh: False
+  skip_eval: True
+
+Mapper:
+  use_multi_reso: False
+  initialization_frames: 4
+  optimization_iters: 10
+  initialization_iters: 10
+  post_refinement:
+    max_steps: 100
+    opt_cam: False
+  KFGraph:
+    kf_interval: 3
+    global_window_size: 2
+  CameraOptimizer:
+    pose_refine_init_steps: 0
+    pose_opt_steps: 2
+
+Model:
+  camera_scale_rescalar: 0.25
+  scene_scale: 1.0

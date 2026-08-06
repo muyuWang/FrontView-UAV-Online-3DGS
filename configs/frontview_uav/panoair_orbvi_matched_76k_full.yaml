@@ -1,0 +1,13 @@
+inherit_from: "configs/panoair_preprocess/orbslam3_vi_fused_baseline_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-matched-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-matched-full"
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_frontview_uav"
+
+Model:
+  extra_pts_num: 3400

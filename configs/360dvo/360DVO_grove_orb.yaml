@@ -1,0 +1,71 @@
+inherit_from: "configs/aria/orb_tracking/aria_base.yaml"
+
+Dataset:
+  name: "360DVO-grove"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_360DVO/grove"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 0
+  max_pts_num: 5000
+  vignette: False
+  use_vignette_type: "post-render"
+  Calibration:
+    fx: 640.000000
+    fy: 640.000000
+    cx: 640.000000
+    cy: 360.000000
+    width: 1280
+    height: 720
+    near: 0.01
+    far: 1000
+
+Testset:
+  name: "360DVO-grove"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_360DVO/grove"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 0
+  max_pts_num: 5000
+  vignette: False
+  use_vignette_type: "post-render"
+  Calibration:
+    fx: 640.000000
+    fy: 640.000000
+    cx: 640.000000
+    cy: 360.000000
+    width: 1280
+    height: 720
+    near: 0.01
+    far: 1000
+
+Results:
+  save_dir: "./Logs_360dvo"
+  save_gt: False
+  save_exr: False
+  save_mesh: False
+  skip_eval: True
+
+Mapper:
+  use_multi_reso: False
+  initialization_frames: 4
+  optimization_iters: 30
+  initialization_iters: 40
+  post_refinement:
+    max_steps: 1000
+    opt_cam: False
+  KFGraph:
+    kf_interval: 1
+    global_window_size: 4
+  CameraOptimizer:
+    pose_refine_init_steps: 0
+    pose_opt_steps: 4
+
+Model:
+  extra_pts_num: 3200
+  err_threshold: 0.05
+  camera_scale_rescalar: 0.25
+  scene_scale: 1.0

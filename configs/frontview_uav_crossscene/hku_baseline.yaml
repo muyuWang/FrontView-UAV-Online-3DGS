@@ -1,0 +1,14 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/lvba/HKU_Cultural_Center_01_geometry_locked_sh2_full.yaml"
+
+Dataset:
+  name: "LVBA-HKU-Cultural-Center-01-crossscene-baseline"
+
+Testset:
+  name: "LVBA-HKU-Cultural-Center-01-crossscene-baseline"
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_frontview_uav_crossscene"
+  skip_eval: false
+
+FrontViewSampling:
+  enabled: false

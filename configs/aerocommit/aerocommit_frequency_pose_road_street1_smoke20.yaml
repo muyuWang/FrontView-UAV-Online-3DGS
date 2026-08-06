@@ -1,0 +1,17 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_sampling_sh1_road_street1_smoke20.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-pose-smoke20"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-pose-smoke20"
+
+Mapper:
+  post_refinement:
+    pose_prepass_enabled: true
+    pose_prepass_steps: 80
+    pose_prepass_level: 2
+    pose_prepass_batch_size: 8
+    pose_prepass_lr: 0.00005
+    pose_prepass_prior_weight: 0.01
+    pose_prepass_max_translation: 0.05

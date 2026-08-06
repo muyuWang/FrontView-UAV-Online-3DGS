@@ -1,0 +1,53 @@
+inherit_from: "configs/progressive_uav/progressive_uav_road_street1_baseline_quality.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-observability-fast"
+
+Testset:
+  name: "HorizonGS-road-street1-observability-fast"
+
+Mapper:
+  post_refinement:
+    max_steps: 1000
+    opt_cam: false
+    # Keep the comparison focused on admission; this extra loss is not in HorizonGS.
+    detail_l1_weight: 0.0
+
+ProgressiveMapping:
+  # Candidate admission is causal; the host mapper remains the quality floor.
+  process_keyframes_only: true
+  process_frame_interval: 2
+  admission_only: true
+  use_keyframes_for_spawn: true
+  patch_size: 24
+  patch_stride: 32
+  max_observations_per_frame: 192
+  max_new_anchors_per_keyframe: 32
+  max_projective_anchors: 1024
+  projective_prune_grace_frames: 10
+  projective_prune_stale_frames: 20
+  promotion_min_observations: 3
+  promotion_min_best_weight: 0.55
+  promotion_max_normalized_entropy: 0.80
+  promotion_max_relative_std: 0.45
+  promotion_min_parallax_deg: 0.35
+  promotion_max_match_error: 0.40
+  near_promotion_min_observations: 3
+  near_promotion_min_best_weight: 0.45
+  near_promotion_max_normalized_entropy: 0.90
+  near_promotion_max_relative_std: 0.60
+  near_promotion_min_parallax_deg: 0.25
+  near_promotion_max_match_error: 0.50
+  commitment_score_enabled: true
+  commitment_min_valid_updates: 2
+  commitment_parallax_reference_deg: 1.0
+  commitment_relative_std_reference: 0.35
+  commitment_match_error_reference: 0.40
+  commitment_score_threshold: 0.08
+  max_promotions_per_frame: 8
+  max_metric_roots: 1024
+  max_optimized_roots_per_step: 64
+  newborn_optimization_iters: 0
+  post_refinement_optimize_progressive: false
+  post_refinement_merge_into_baseline: true
+  debug: false

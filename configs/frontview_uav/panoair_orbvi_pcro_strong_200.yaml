@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pcro_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-pcro-strong-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-pcro-strong-200"
+
+FrontViewObservability:
+  min_ray_lr_scale: 0.0
+  unlock_parallax_deg: 8.0

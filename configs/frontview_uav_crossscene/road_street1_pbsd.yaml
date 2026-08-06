@@ -1,0 +1,16 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/frontview_uav_crossscene/road_street1_baseline.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-crossscene-pbsd"
+
+Testset:
+  name: "HorizonGS-road-street1-crossscene-pbsd"
+
+FrontViewSampling:
+  enabled: true
+  selection_mode: "depth_stratified"
+  pool_multiplier: 2
+  depth_edges_m: [20.0, 50.0]
+  depth_fractions: [0.25, 0.45, 0.30]
+  shuffle_depth_bands: false
+  shuffle_seed: 42

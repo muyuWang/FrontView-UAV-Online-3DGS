@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_acdt_split_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-acdt-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-acdt-200"
+
+FrontViewDepthTransport:
+  apply_correction: true

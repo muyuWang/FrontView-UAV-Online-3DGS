@@ -1,0 +1,15 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/horizongs/HorizonGS_road_street1_orb_persistent_fine_balanced_eval_v1.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-balanced-matched-modp-input"
+  dataset_path: "/home/wmy/workspace_vla/modp_raw/data_runtime/HorizonGS/road_street1_orb_persistent_fine_v1"
+
+Testset:
+  name: "HorizonGS-road-street1-balanced-matched-modp-input"
+  dataset_path: "/home/wmy/workspace_vla/modp_raw/data_runtime/HorizonGS/road_street1_orb_persistent_fine_v1"
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_far_near_optimization_7_22"
+
+Mapper:
+  pin_kf_gpu: true

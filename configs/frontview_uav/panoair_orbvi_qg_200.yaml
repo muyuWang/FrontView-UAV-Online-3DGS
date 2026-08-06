@@ -1,0 +1,74 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_modp_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-qg-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-qg-200"
+
+Mapper:
+  force_keyframes_through_frame: 199
+  use_multi_reso: false
+  FrameChecker:
+    use_frame_checker: false
+  KFGraph:
+    kf_interval: 1
+  CameraOptimizer:
+    use_camera_opt: false
+    pose_opt_steps: 0
+
+Model:
+  frequency_sampling:
+    enabled: false
+    preserve_sparse_track_geometry: true
+
+AeroCommit:
+  enabled: true
+  bootstrap_frames: 0
+  admission:
+    policy: "immediate"
+    trusted_sparse_fast_path: false
+    trusted_depthcov_fast_path: false
+    allow_depthcov_candidates: true
+  budget:
+    enabled: false
+  archive:
+    enabled: false
+  debug:
+    enabled: false
+
+WorldTestGS:
+  enabled: true
+  admission_mode: "true_qg"
+  allow_invalid_world_stress: false
+  calibration_version: "panoair_orbvi_v2"
+  qg_threshold: 2.9444389791664403
+  min_views: 3
+  max_views: 8
+  max_groups: 12000
+  max_evaluations_per_frame: 256
+  max_commits_per_frame: 256
+  freeze_committed_means: false
+  committed_mean_trust_radius_m: 0.05
+  offline_sparse_track_cache: true
+  offline_cache_frames: 200
+  candidate_max_age: 60
+  flow_cycle_threshold_px: 1.5
+  minimum_parallax_deg: 0.2
+  rank_ratio_threshold: 0.000001
+  pixel_sigma: 1.0
+  inverse_depth_sigma_floor: 0.001
+  pose_rotation_sigma_deg: 0.5
+  pose_translation_sigma_m: 0.01
+  nuisance_window_frames: 16
+  nuisance_update_interval: 4
+  nuisance_knot_stride: 4
+  nuisance_huber_delta: 3.0
+  nuisance_damping: 0.000001
+  prior_scales: [0.5, 1.0, 2.0]
+  scene_prior_near: 0.05
+  scene_prior_far: 120.0
+  shadow_alpha_cap: 0.1
+  schedule_path: null
+  random_seed: 42
+  debug: false

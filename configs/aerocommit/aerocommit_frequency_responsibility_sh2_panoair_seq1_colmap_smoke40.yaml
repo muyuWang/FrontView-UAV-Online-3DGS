@@ -1,0 +1,11 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_responsibility_sh2_panoair_seq1_full.yaml"
+
+Dataset:
+  name: "PanoAir-seq1-colmap-aerocommit-frequency-responsibility-sh2-smoke40"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1_colmap_consistent"
+  end_cutoff: 2328
+
+Testset:
+  name: "PanoAir-seq1-colmap-aerocommit-frequency-responsibility-sh2-smoke40"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1_colmap_consistent"
+  end_cutoff: 2328

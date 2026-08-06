@@ -1,0 +1,14 @@
+inherit_from: "configs/horizongs/HorizonGS_road_street1_orb.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-baseline-smoke20"
+  end_cutoff: 138
+
+Testset:
+  name: "HorizonGS-road-street1-baseline-smoke20"
+  end_cutoff: 138
+
+Mapper:
+  post_refinement:
+    max_steps: 200
+    opt_cam: false

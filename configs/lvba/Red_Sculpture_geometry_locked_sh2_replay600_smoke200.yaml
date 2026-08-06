@@ -1,0 +1,11 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/lvba/Red_Sculpture_geometry_locked_sh2_smoke200.yaml"
+
+Dataset:
+  name: "LVBA-Red_Sculpture-geometry-locked-sh2-replay600-smoke200"
+
+Testset:
+  name: "LVBA-Red_Sculpture-geometry-locked-sh2-replay600-smoke200"
+
+Mapper:
+  post_refinement:
+    max_steps: 600

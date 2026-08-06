@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_atlas_3200_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-atlas-4800-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-atlas-4800-200"
+
+Model:
+  extra_pts_num: 4800

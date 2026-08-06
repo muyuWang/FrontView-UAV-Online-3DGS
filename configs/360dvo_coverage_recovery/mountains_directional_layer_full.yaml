@@ -1,0 +1,24 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_coverage_recovery/mountains_motionfloor_tracking5_full.yaml
+
+Dataset:
+  name: 360DVO-DirectionalLayer-mountains
+
+Testset:
+  name: 360DVO-DirectionalLayer-mountains
+
+Results:
+  save_dir: /home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_360dvo_directional_layer_8_3
+
+FrontViewDirectionalLayer:
+  enabled: true
+  sparse_point_threshold: 10
+  anchor_interval_frames: 20
+  max_anchors: 12
+  min_anchors: 2
+  far_depth_m: 80.0
+  low_opacity_threshold: 0.50
+  consistency_threshold: 0.12
+  blend_weight: 0.75
+  exclude_exact_frame: true
+  causal_only: true
+  use_geometry_gate: false

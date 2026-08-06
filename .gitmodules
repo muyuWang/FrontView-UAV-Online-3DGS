@@ -1,0 +1,4 @@
+[submodule "DepthCov-Modified"]
+	path = DepthCov-Modified
+	url = https://github.com/Poiw/DepthCov-Modified.git
+	branch = main

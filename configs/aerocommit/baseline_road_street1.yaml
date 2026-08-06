@@ -1,0 +1,11 @@
+inherit_from: "configs/horizongs/HorizonGS_road_street1_orb.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-baseline"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-baseline"
+
+Results:
+  save_dir: "./Logs_progressive_uav_new"
+  skip_eval: true

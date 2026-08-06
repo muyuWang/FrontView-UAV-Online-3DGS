@@ -1,0 +1,19 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_pose_appearance20_road_street1_smoke40.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-sparse-track-footprint-smoke20"
+  end_cutoff: 138
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-sparse-track-footprint-smoke20"
+  end_cutoff: 138
+
+Mapper:
+  post_refinement:
+    appearance_freeze_scales: true
+
+Model:
+  frequency_sampling:
+    preserve_sparse_track_geometry: true
+  init_gaussian_config:
+    max_scale_expansion: 4.0

@@ -1,0 +1,49 @@
+inherit_from: "configs/aerocommit/npo_gate_road_street1_smoke20.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-mvp-smoke20"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-mvp-smoke20"
+
+AeroCommit:
+  mode: aerocommit_mvp
+  admission:
+    fuse_support_proposals: false
+    commit_snapshot_policy: reference
+    trusted_depthcov_fast_path: true
+    trusted_depth_confidence_threshold: 0.35
+    max_fused_proposals_per_candidate: 128
+    fusion_relative_depth_threshold: 0.35
+    fusion_voxel_scale_ratio: 0.35
+    side_fusion_capacity_multiplier: 1.5
+  commit_refinement:
+    enabled: true
+    max_commits_per_keyframe: 128
+    iterations: 8
+    learning_rate: 0.05
+    max_depth_correction_ratio: 0.20
+    color_fusion_strength: 0.35
+    initial_opacity: 0.25
+    force_new_group: true
+    group_chunk_keyframes: 4
+  detail_refinement:
+    enabled: true
+    refine_min_views: 3
+    refine_min_projected_radius_px: 0.65
+    refine_min_stable_residual: 0.04
+    child_count: 4
+    child_scale_ratio: 0.55
+    max_splits_per_keyframe: 48
+    side_score_boost: 2.5
+  budget:
+    enabled: true
+    max_candidate_bank_size: 3000
+    max_active_trainable_gaussians: 350000
+    max_active_trainable_bytes: null
+    archive_after_unseen_frames: 40
+  archive:
+    enabled: true
+    cpu_dtype: float16
+    enable_reactivation: true
+    archive_directory: null

@@ -1,0 +1,23 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_equal_count_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-crwd-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-crwd-200"
+
+FrontViewSampling:
+  enabled: true
+  selection_mode: "evidence_balanced"
+  pool_multiplier: 2
+  evidence_fraction: 0.50
+  reference_frames: 2
+  photo_sigma: 0.08
+  photo_mode: "consistency"
+  parallax_reference_deg: 2.0
+  parallax_floor: 0.25
+  confidence_power: 1.0
+  shuffle_evidence: false
+  shuffle_seed: 42
+  depth_edges_m: [20.0, 50.0]
+  depth_fractions: [0.33, 0.34, 0.33]

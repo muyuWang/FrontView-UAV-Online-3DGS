@@ -1,0 +1,10 @@
+inherit_from: "configs/progressive_uav/progressive_uav_road_street1_quality_smoke20_early_allframe.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-progressive-quality-smoke20-early-keyframes"
+
+Testset:
+  name: "HorizonGS-road-street1-progressive-quality-smoke20-early-keyframes"
+
+Mapper:
+  force_keyframes_through_frame: 4

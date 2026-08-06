@@ -1,0 +1,16 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_responsibility_replay_road_street1_smoke40.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-responsibility-sh2-smoke40"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-responsibility-sh2-smoke40"
+
+Model:
+  sh_degree: 2
+
+Mapper:
+  post_refinement:
+    max_steps: 800
+    appearance_only_start_step: 360
+    appearance_freeze_scales: true

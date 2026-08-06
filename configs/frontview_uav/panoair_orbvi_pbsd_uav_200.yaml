@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pbsd_equal_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-pbsd-uav-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-pbsd-uav-200"
+
+FrontViewSampling:
+  depth_fractions: [0.25, 0.45, 0.30]

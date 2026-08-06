@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_strict16_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-strict16-mix25-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-strict16-mix25-200"
+
+FrontViewBirth:
+  priority_fraction: 0.25

@@ -1,0 +1,17 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_equal_count_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-pcro-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-pcro-200"
+
+FrontViewObservability:
+  enabled: true
+  min_ray_lr_scale: 0.10
+  unlock_parallax_deg: 4.0
+  visibility_margin_px: 16.0
+  evidence_update_interval: 10
+  apply_post_refinement: true
+  shuffle_evidence: false
+  shuffle_seed: 42

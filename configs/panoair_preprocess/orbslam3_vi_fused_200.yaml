@@ -1,0 +1,30 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_worldtest_gs/benchmarks/trust5cm_replay700_v6/colmap_true_qg_500.yaml"
+
+Dataset:
+  name: "PanoAir-preprocess-orbslam3-vi-fused-200"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1_orbslam3_mono_vi_fused_472_v2"
+  begin_cutoff: 0
+  end_cutoff: 272
+
+Testset:
+  name: "PanoAir-preprocess-orbslam3-vi-fused-200"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1_orbslam3_mono_vi_fused_472_v2"
+  begin_cutoff: 0
+  end_cutoff: 272
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_panoair_preprocess"
+
+Mapper:
+  force_keyframes_through_frame: 199
+  post_refinement:
+    max_steps: 100
+
+WorldTestGS:
+  admission_mode: true_qg
+  offline_cache_frames: 200
+  debug: false
+
+AeroCommit:
+  debug:
+    enabled: false

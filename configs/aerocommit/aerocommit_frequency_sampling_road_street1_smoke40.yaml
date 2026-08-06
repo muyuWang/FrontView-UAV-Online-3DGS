@@ -1,0 +1,9 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_sampling_road_street1_smoke20.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-sampling-smoke40"
+  end_cutoff: 118
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-sampling-smoke40"
+  end_cutoff: 118

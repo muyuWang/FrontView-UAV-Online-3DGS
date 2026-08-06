@@ -1,0 +1,29 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_pose_depthgate_road_street1_smoke20.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-twoview-smoke20"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-twoview-smoke20"
+
+AeroCommit:
+  admission:
+    frequency_candidate_enabled: true
+    frequency_candidate_score_threshold: 0.65
+    frequency_candidate_min_support: 2
+    frequency_candidate_min_parallax_deg: 0.10
+    frequency_candidate_risk_threshold: 0.25
+    association_radius_px: 64.0
+    association_descriptor_threshold: 0.75
+    association_relative_depth_threshold: 1.50
+    association_residual_threshold: 0.50
+    candidate_group_cell_px: 96
+    candidate_group_log_depth_bin: 0.75
+    max_candidate_groups_per_frame: 480
+    max_risk_candidates_per_keyframe: 256
+    side_quota_fraction: 0.50
+  commit_refinement:
+    max_commits_per_keyframe: 256
+  detail_refinement:
+    refine_min_views: 2
+    max_splits_per_keyframe: 64

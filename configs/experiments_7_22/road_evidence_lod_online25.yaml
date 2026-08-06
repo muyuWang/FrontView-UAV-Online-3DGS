@@ -1,0 +1,10 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/experiments_7_22/road_multiview_iter25_control.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-evidence-lod-online25"
+
+Testset:
+  name: "HorizonGS-road-street1-evidence-lod-online25"
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_far_near_optimization_7_22"

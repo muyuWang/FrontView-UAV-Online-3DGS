@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_modp_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-matched-76k-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-matched-76k-200"
+
+Model:
+  extra_pts_num: 3400

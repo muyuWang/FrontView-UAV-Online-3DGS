@@ -1,0 +1,97 @@
+inherit_from: "configs/aria/orb_tracking/aria_base.yaml"
+
+Dataset:
+  name: "360DVO-FPR80-drone-racetrack"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_360DVO/drone_racetrack"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 0
+  stride: 1
+  max_pts_num: 5000
+  vignette: False
+  use_vignette_type: "post-render"
+  Calibration:
+    fx: 640.0
+    fy: 640.0
+    cx: 640.0
+    cy: 360.0
+    width: 1280
+    height: 720
+    near: 0.01
+    far: 1000.0
+
+Testset:
+  name: "360DVO-FPR80-drone-racetrack"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_360DVO/drone_racetrack"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 0
+  stride: 1
+  max_pts_num: 5000
+  vignette: False
+  use_vignette_type: "post-render"
+  Calibration:
+    fx: 640.0
+    fy: 640.0
+    cx: 640.0
+    cy: 360.0
+    width: 1280
+    height: 720
+    near: 0.01
+    far: 1000.0
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_360dvo_fpr80"
+  save_gt: False
+  save_exr: False
+  save_mesh: False
+  skip_eval: False
+
+Mapper:
+  use_multi_reso: False
+  initialization_frames: 4
+  optimization_iters: 10
+  initialization_iters: 10
+  post_refinement:
+    max_steps: 100
+    opt_cam: False
+  KFGraph:
+    kf_interval: 1
+    global_window_size: 4
+  CameraOptimizer:
+    pose_refine_init_steps: 0
+    pose_opt_steps: 4
+
+Model:
+  extra_pts_num: 3200
+  err_threshold: 0.05
+  camera_scale_rescalar: 0.25
+  scene_scale: 1.0
+
+FrontViewSampling:
+  enabled: True
+  selection_mode: "depth_stratified"
+  pool_multiplier: 2
+  evidence_fraction: 0.5
+  reference_frames: 2
+  photo_sigma: 0.08
+  photo_mode: "consistency"
+  parallax_reference_deg: 2.0
+  parallax_floor: 0.25
+  confidence_power: 1.0
+  shuffle_evidence: False
+  shuffle_seed: 42
+  depth_edges_m: [20.0, 50.0]
+  depth_fractions: [0.25, 0.45, 0.30]
+
+FrontViewFarField:
+  enabled: True
+  depth_m: 80.0
+  projective_cell_px: 12
+  depth_bin_ratio: 1.10
+  shuffle_responsibility: False
+  shuffle_seed: 42

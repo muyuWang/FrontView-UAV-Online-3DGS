@@ -1,0 +1,17 @@
+inherit_from: "configs/aerocommit/aerocommit_track_detail_road_street1_smoke20.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-track-reassign-smoke20"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-track-reassign-smoke20"
+
+AeroCommit:
+  track_detail:
+    mode: reassign
+    max_total_gaussians: 6000
+    reassign_max_distance: 0.50
+    reassign_scale_multiplier: 1.25
+    reassign_color_blend: 0.50
+    reassign_mean_blend: 0.25
+    reassign_opacity_floor: 0.25

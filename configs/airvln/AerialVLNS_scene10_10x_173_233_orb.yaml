@@ -1,0 +1,11 @@
+inherit_from: "configs/airvln/AerialVLNS_scene10_10x_orb.yaml"
+
+Dataset:
+  name: "AerialVLNS-scene10-10x-173-233"
+  begin_cutoff: 173
+  end_cutoff: 1517
+
+Testset:
+  name: "AerialVLNS-scene10-10x-173-233"
+  begin_cutoff: 173
+  end_cutoff: 1517

@@ -1,0 +1,34 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/lvba/Red_Sculpture_baseline_full.yaml"
+
+Dataset:
+  name: "LVBA-Red_Sculpture-geometry-locked-sh2-full"
+
+Testset:
+  name: "LVBA-Red_Sculpture-geometry-locked-sh2-full"
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_lvba_quality"
+  skip_eval: true
+
+Mapper:
+  post_refinement:
+    max_steps: 1000
+    freeze_geometry: true
+    use_all_frames: true
+    all_frame_batch_size: 4
+    all_frame_hard_fraction: 0.75
+    all_frame_hard_warmup_steps: 80
+    all_frame_min_uniform_replays: 2
+    all_frame_frequency_error_weight: 1.0
+    all_frame_frequency_gradient_threshold: 0.035
+    all_frame_frequency_side_start: 0.35
+    appearance_only_start_step: 0
+    appearance_freeze_scales: true
+    detail_loss_start_step: 0
+    detail_l1_weight: 0.0
+    detail_gradient_weight: 0.0
+    detail_laplacian_fine_weight: 0.0
+    detail_laplacian_coarse_weight: 0.0
+
+Model:
+  sh_degree: 2

@@ -1,0 +1,19 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_coverage_recovery/mountains_full.yaml
+
+Dataset:
+  name: 360DVO-CoverageRecoveryMotionTracking5-mountains
+
+Testset:
+  name: 360DVO-CoverageRecoveryMotionTracking5-mountains
+
+FrontViewCoverageRecovery:
+  depth_fallback_motion_floor_enabled: true
+  depth_fallback_max_projected_drift_px: 8.0
+  depth_fallback_motion_floor_max_m: 500.0
+  depth_fallback_map_enabled: false
+  depth_fallback_scale_multiplier: 10.0
+  newborn_optimization_iters: 5
+  newborn_max_scale_expansion: 1.0
+  newborn_freeze_positions: true
+  tracking_update_interval: 5
+  tracking_optimization_iters: 1

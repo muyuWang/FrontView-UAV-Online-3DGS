@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_post_rr_mse100_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-post-rr-mse100-s4-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-post-rr-mse100-s4-200"
+
+Mapper:
+  post_refinement:
+    appearance_mse_scale: 4.0

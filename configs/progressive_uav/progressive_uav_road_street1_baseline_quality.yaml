@@ -1,0 +1,55 @@
+inherit_from: "configs/progressive_uav/progressive_uav_road_street1.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-progressive-quality"
+
+Testset:
+  name: "HorizonGS-road-street1-progressive-quality"
+
+Mapper:
+  optimization_iters: 30
+  coarse_active_window_size: 1
+  coarse_pool_size: 10
+  post_refinement:
+    max_steps: 1000
+    opt_cam: false
+    detail_l1_weight: 0.20
+    detail_gradient_threshold: 0.04
+    detail_near_depth_m: 50.0
+  CameraOptimizer:
+    use_camera_opt: true
+    pose_refine_init_steps: 0
+    pose_opt_steps: 4
+
+Loss:
+  lambda_depth: 0.0
+  lambda_normal: 0.0
+  lambda_distortion: 0.0
+
+Model:
+  gaussian_type: 3dgs
+
+ProgressiveMapping:
+  metric_initial_opacity: 0.05
+  surface_initial_opacity_floor: 0.0
+  surface_opacity_min: 0.0
+  surface_scale_min_factor: 0.10
+  surface_scale_max_factor: 2.0
+  surface_max_projected_sigma_px: 12.0
+  enable_center_regularization: false
+  current_view_optimization_fraction: 0.0
+  newborn_optimization_iters: 1
+  max_promotions_per_frame: 64
+  max_refinements_per_frame: 32
+  max_optimized_roots_per_step: 0
+  means_lr_multiplier: 1.0
+  scales_lr_multiplier: 1.0
+  quats_lr_multiplier: 1.0
+  appearance_lr_multiplier: 1.0
+  post_refinement_optimize_progressive: false
+  post_refinement_merge_into_baseline: true
+  near_surface_children: 25
+  very_near_surface_children: 49
+  near_child_scale_ratio: 0.22
+  very_near_child_scale_ratio: 0.16
+  archive_after_unseen_frames: 100000

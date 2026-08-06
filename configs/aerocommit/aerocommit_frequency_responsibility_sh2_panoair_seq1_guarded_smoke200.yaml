@@ -1,0 +1,9 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_responsibility_sh2_panoair_seq1_full.yaml"
+
+Dataset:
+  name: "PanoAir-seq1-aerocommit-guarded-smoke200"
+  end_cutoff: 2168
+
+Testset:
+  name: "PanoAir-seq1-aerocommit-guarded-smoke200"
+  end_cutoff: 2168

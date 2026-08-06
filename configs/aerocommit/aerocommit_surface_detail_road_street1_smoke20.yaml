@@ -1,0 +1,26 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_pose_appearance20_road_street1_smoke40.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-surface-detail-smoke20"
+  end_cutoff: 138
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-surface-detail-smoke20"
+  end_cutoff: 138
+
+AeroCommit:
+  surface_detail:
+    enabled: true
+    gradient_threshold: 0.035
+    residual_threshold: 0.05
+    opacity_threshold: 0.65
+    side_start: 0.35
+    near_depth_m: 60.0
+    voxel_size: 0.05
+    projected_scale_px: 0.60
+    initial_opacity: 0.35
+    max_scale_expansion: 1.25
+    max_commits_per_keyframe: 384
+    max_total_gaussians: 10000
+    side_score_boost: 2.0
+    freeze_geometry: true

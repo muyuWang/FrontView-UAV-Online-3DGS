@@ -1,0 +1,15 @@
+inherit_from: "configs/aerocommit/aerocommit_sparse_flow_detail_road_street1_smoke40.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-multiview-flow-detail-smoke40"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-multiview-flow-detail-smoke40"
+
+AeroCommit:
+  flow_detail:
+    track_views: 3
+    reprojection_threshold_px: 1.5
+    voxel_size: 0.10
+    max_commits_per_frame: 256
+    max_total_gaussians: 5000

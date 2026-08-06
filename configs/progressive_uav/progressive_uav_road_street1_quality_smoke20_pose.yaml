@@ -1,0 +1,11 @@
+inherit_from: "configs/progressive_uav/progressive_uav_road_street1_quality_smoke20_long.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-progressive-quality-smoke20-pose"
+
+Testset:
+  name: "HorizonGS-road-street1-progressive-quality-smoke20-pose"
+
+Mapper:
+  post_refinement:
+    opt_cam: true

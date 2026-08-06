@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_mix50_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-replay-range-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-replay-range-200"
+
+Mapper:
+  KFGraph:
+    get_next_camera_method: "frontview_range_error"
+    frontview_replay_seed: 42

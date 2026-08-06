@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_post_rr_freeze90_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-post-rr-layer-budget-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-post-rr-layer-budget-200"
+
+FrontViewBirth:
+  preserve_layer_budget: true

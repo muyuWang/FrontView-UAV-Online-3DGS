@@ -1,0 +1,20 @@
+inherit_from: "configs/aerocommit/aerocommit_mvp_road_street1_smoke20.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-sampling-smoke20"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-sampling-smoke20"
+
+Model:
+  sh_degree: 0
+  frequency_sampling:
+    enabled: true
+    frequency_fraction: 0.75
+    gradient_threshold: 0.04
+    laplacian_threshold: 0.08
+    side_start: 0.45
+    side_boost: 2.0
+    stable_opacity_threshold: 0.30
+    stable_opacity_boost: 2.0
+    max_footprint_shrink_fraction: 0.30

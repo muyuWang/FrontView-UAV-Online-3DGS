@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_modp_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-equal-count-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-equal-count-200"
+
+# Capacity control for P/M/S/A: increase only MODP's existing random DepthCov
+# proposal budget, targeting the same final map size as the 77k-GS P/M/S/A run.
+Model:
+  extra_pts_num: 3200

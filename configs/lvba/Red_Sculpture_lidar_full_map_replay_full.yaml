@@ -1,0 +1,14 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/lvba/Red_Sculpture_lidar_fastpath_full.yaml"
+
+Dataset:
+  name: "LVBA-Red_Sculpture-lidar-full-map-replay-full"
+
+Testset:
+  name: "LVBA-Red_Sculpture-lidar-full-map-replay-full"
+
+Mapper:
+  post_refinement:
+    max_steps: 1000
+    restore_aerocommit_archives: true
+    freeze_geometry: true
+    appearance_only_start_step: 0

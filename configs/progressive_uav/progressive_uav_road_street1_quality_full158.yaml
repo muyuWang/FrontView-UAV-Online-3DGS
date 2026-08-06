@@ -1,0 +1,30 @@
+inherit_from: "configs/progressive_uav/progressive_uav_road_street1_baseline_quality.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-progressive-quality-full158"
+
+Testset:
+  name: "HorizonGS-road-street1-progressive-quality-full158"
+
+Mapper:
+  post_refinement:
+    max_steps: 4000
+    opt_cam: true
+    use_all_frames: true
+    all_frame_batch_size: 4
+    all_frame_hard_fraction: 0.50
+    all_frame_hard_warmup_steps: 200
+    anchor_first_pose: true
+    detail_l1_weight: 0.20
+    detail_gradient_weight: 0.10
+    detail_gradient_threshold: 0.04
+    detail_near_depth_m: 60.0
+    detail_low_opacity_threshold: 0.15
+
+Model:
+  sh_degree: 1
+
+ProgressiveMapping:
+  bootstrap_frames: 0
+  use_keyframes_for_spawn: false
+  spawn_interval: 1

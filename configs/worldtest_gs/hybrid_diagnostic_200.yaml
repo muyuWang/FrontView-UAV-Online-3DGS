@@ -1,0 +1,216 @@
+
+Dataset:
+  name: "PanoAir-seq1-worldtest-coordinate-hybrid-200"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 2168
+  stride: 1
+  max_pts_num: 5000
+  vignette: false
+  use_vignette_type: "post-render"
+  Calibration: &panoair_calibration
+    fx: 320.0
+    fy: 320.0
+    cx: 480.0
+    cy: 320.0
+    width: 960
+    height: 640
+    near: 0.05
+    far: 120.0
+
+Testset:
+  name: "PanoAir-seq1-worldtest-coordinate-hybrid-200"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 2168
+  stride: 1
+  max_pts_num: 5000
+  vignette: false
+  use_vignette_type: "post-render"
+  Calibration: *panoair_calibration
+
+Results:
+  save_dir: "./Logs_worldtest_gs"
+  save_gt: false
+  save_exr: false
+  save_mesh: false
+  skip_eval: true
+
+Mapper:
+  device: "cuda:0"
+  active_window_size: 1
+  coarse_active_window_size: 1
+  coarse_level_interval: 5
+  coarse_pool_size: 10
+  add_gaussians_interval: 0
+  prune_interval: 100
+  initialization_frames: 4
+  group_max_gaussian_frames: 100000000
+  interactive_visualization: none
+  save_model_interval: 100000000
+  use_multi_reso: false
+  use_dataset: true
+  pin_kf_gpu: false
+  optimization_iters: 10
+  initialization_iters: 20
+  force_keyframes_through_frame: 199
+  FrameChecker:
+    use_frame_checker: false
+    rot_speed_threshold: 10
+    pts_num_threshold: 10
+  KFGraph:
+    kf_selection_method: "overlap_mixed"
+    kf_overlap_ratio: 0.95
+    kf_interval: 1
+    global_window_size: 4
+    get_next_camera_method: "err_idx_diff"
+    pos_clamp: 1
+    pos_sigma: 10
+    cov_clamp: 0.75
+    cov_eps: 0.00001
+    err_sigma: 50
+    ris_size: 10
+    idx_diff_sigma: 0.001
+  CameraOptimizer:
+    use_camera_opt: false
+    max_num: 8192
+    use_hierarchy: false
+    lr: 0.00001
+    weight_decay: 0.0
+    pose_refine_init_steps: 0
+    pose_opt_steps: 0
+    device: "cuda:0"
+  post_refinement:
+    max_steps: 100
+    opt_cam: false
+    means_lr_init: 0.00004
+    means_lr_final: 0.0000004
+    scales_lr_init: 0.003
+    scales_lr_final: 0.001
+    quats_lr: 0.001
+    opacities_lr: 0.05
+    sh_lr: 0.005
+    pose_prepass_enabled: false
+    appearance_only_start_step: 50
+    detail_loss_start_step: 100
+    all_frame_hard_fraction: 0.5
+
+Loss:
+  device: "cuda:0"
+  color_loss_type: "l1"
+  lambda_ssim: 0.2
+  use_tonemap: false
+  mu: 8
+  lambda_g: 1.0
+  g_loss_type: "min_constraint"
+  min_scale_ratio: 10
+  lambda_depth: 0.0
+  lambda_normal: 0.0
+  lambda_distortion: 0.0
+  lambda_normal_reg: 0.0
+  normal_reg_threshold: 0.02
+
+Model:
+  gaussian_type: "3dgs"
+  sh_degree: 2
+  use_anti_aliasing: true
+  render_mode: "RGB+ED"
+  device: "cuda:0"
+  radius_clip: 0
+  init_scale_size: -6
+  densification_mode: "sparse_points_only"
+  init_scale_offset: 0.5
+  err_threshold: 0.05
+  semi_dense_err_threshold: 0.0
+  camera_scale_rescalar: 0.25
+  opacity_prune_threshold: 0.01
+  scene_scale: 1.0
+  gaussian_pos_schedule_steps: 0
+  init_gaussian_config:
+    means_lr_init: 0.00004
+    means_lr_final: 0.00004
+    scales_lr_init: 0.003
+    scales_lr_final: 0.003
+    quats_lr_init: 0.001
+    quats_lr_final: 0.001
+    opacities_lr: 0.05
+    sh_lr: 0.0025
+    max_scale_expansion: 2.0
+  frequency_sampling:
+    enabled: false
+    preserve_sparse_track_geometry: true
+
+HashBlock:
+  use_hash: true
+  start_scale: 20
+  hash_size: 512
+  hash_level: 8
+  use_color_hash: false
+  color_hash_size: 2
+  remove_conflict: true
+
+AeroCommit:
+  enabled: true
+  mode: "aerocommit_mvp"
+  bootstrap_frames: 5
+  diagnostic_allow_unsafe_hybrid: true
+  admission:
+    policy: "immediate"
+    trusted_sparse_fast_path: true
+    trusted_depthcov_fast_path: false
+    allow_depthcov_candidates: false
+    gate_interval: 1
+    min_support: 3
+    max_support_edges: 4
+    max_risk_candidates_per_keyframe: 128
+    candidate_group_cell_px: 128
+    candidate_group_log_depth_bin: 0.5
+    max_candidate_groups_per_frame: 320
+    max_candidate_bank_size: 3000
+    fast_path_max_gaussians_per_frame: 1200
+    fast_path_frequency_fraction: 0.5
+    fast_path_group_frames: 20
+    fast_path_initial_opacity: 0.25
+  commit_refinement:
+    enabled: false
+    max_commits_per_keyframe: 128
+    iterations: 1
+    learning_rate: 0.05
+    max_depth_correction_ratio: 0.2
+    color_fusion_strength: 0.35
+    initial_opacity: 0.25
+    force_new_group: true
+    group_chunk_keyframes: 20
+    newborn_optimization_iters: 0
+    newborn_multiview: false
+  detail_refinement:
+    enabled: false
+    child_count: 4
+  track_detail:
+    enabled: false
+  surface_detail:
+    enabled: false
+  flow_detail:
+    enabled: false
+  budget:
+    enabled: true
+    max_candidate_bank_size: 3000
+    max_active_trainable_gaussians: 350000
+    max_active_trainable_bytes: null
+    archive_after_unseen_frames: 1000000
+  archive:
+    enabled: false
+    cpu_dtype: "float16"
+    enable_reactivation: false
+    archive_directory: null
+  debug:
+    enabled: true
+    save_interval: 10
+    log_candidate_stats: true
+    log_memory_breakdown: true

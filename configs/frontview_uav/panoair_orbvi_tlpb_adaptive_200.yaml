@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_layered_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-adaptive-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-adaptive-200"
+
+FrontViewBirth:
+  adaptive_layer_balance: true
+  layer_quantiles: [0.55, 0.88]
+  layer_fractions: [0.33, 0.45, 0.22]

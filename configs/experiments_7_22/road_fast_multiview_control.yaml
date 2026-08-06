@@ -1,0 +1,14 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/experiments_7_22/road_fast_dense_residual_control.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-fast-multiview-control"
+
+Testset:
+  name: "HorizonGS-road-street1-fast-multiview-control"
+
+Mapper:
+  KFGraph:
+    kf_interval: 1
+    global_window_size: 4
+  CameraOptimizer:
+    pose_opt_steps: 4

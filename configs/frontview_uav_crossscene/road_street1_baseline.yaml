@@ -1,0 +1,14 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/experiments_7_22/road_evidence_lod_online25.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-crossscene-baseline"
+
+Testset:
+  name: "HorizonGS-road-street1-crossscene-baseline"
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_frontview_uav_crossscene"
+  skip_eval: false
+
+FrontViewSampling:
+  enabled: false

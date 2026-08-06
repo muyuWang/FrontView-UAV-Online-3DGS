@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_post_range_rr_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-post-range-rr-shuffled-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-post-range-rr-shuffled-200"
+
+Mapper:
+  post_refinement:
+    sampling_method: "frontview_range_round_robin_shuffled"

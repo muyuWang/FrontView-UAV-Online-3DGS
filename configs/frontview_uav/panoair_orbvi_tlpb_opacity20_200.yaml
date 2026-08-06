@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_mix50_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-opacity20-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-opacity20-200"
+
+FrontViewBirth:
+  responsibility_opacity: true
+  depthcov_opacity_min: 0.20
+  depthcov_opacity_max: 0.50

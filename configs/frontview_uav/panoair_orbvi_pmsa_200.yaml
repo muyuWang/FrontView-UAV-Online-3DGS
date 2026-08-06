@@ -1,0 +1,104 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_modp_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-pmsa-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-pmsa-200"
+
+ProgressiveMapping:
+  enabled: true
+  bootstrap_frames: 0
+  replace_original_densification_after_bootstrap: false
+  process_keyframes_only: false
+  process_frame_interval: 1
+  admission_only: false
+  use_keyframes_for_spawn: false
+  spawn_interval: 1
+  patch_size: 24
+  patch_stride: 14
+  descriptor_resize: 4
+  appearance_grid_size: 8
+  max_observations_per_frame: 1536
+  max_new_anchors_per_keyframe: 256
+  near_observation_depth_m: 30.0
+  near_observation_fraction: 0.70
+  near_spawn_fraction: 0.85
+  spawn_requires_valid_depth: true
+  candidate_opacity_threshold: 0.15
+  candidate_residual_threshold: 0.15
+  candidate_min_gradient: 0.01
+  num_inverse_depth_modes: 4
+  inverse_depth_log_offsets: [-0.7, -0.25, 0.25, 0.7]
+  association_radius_px: 18.0
+  association_feature_threshold: 0.50
+  association_photo_weight: 0.25
+  association_pixel_weight: 0.10
+  association_temperature: 0.10
+  minimum_probability_floor: 0.0001
+  descriptor_ema: 0.10
+  color_ema: 0.10
+  residual_ema: 0.10
+  promotion_min_observations: 3
+  promotion_min_best_weight: 0.55
+  promotion_max_normalized_entropy: 0.80
+  promotion_max_relative_std: 0.45
+  promotion_min_parallax_deg: 0.35
+  promotion_max_match_error: 0.40
+  near_promotion_max_depth_m: 50.0
+  near_promotion_min_observations: 2
+  near_promotion_min_best_weight: 0.30
+  near_promotion_max_normalized_entropy: 0.98
+  near_promotion_max_relative_std: 0.75
+  near_promotion_min_parallax_deg: 0.10
+  near_promotion_max_match_error: 0.65
+  near_inverse_depth_log_offsets: [-0.20, -0.05, 0.05, 0.20]
+  metric_merge_radius_factor: 0.75
+  metric_merge_feature_threshold: 0.80
+  metric_initial_opacity: 0.05
+  metric_scale_factor: 1.0
+  surface_initial_opacity_floor: 0.0
+  surface_opacity_min: 0.0
+  refine_min_observations: 4
+  refine_min_projected_radius_px: 12.0
+  refine_min_residual: 0.08
+  refine_min_confidence: 0.50
+  children_per_root: 9
+  child_scale_ratio: 0.40
+  near_surface_depth_m: 60.0
+  very_near_surface_depth_m: 30.0
+  near_surface_children: 25
+  very_near_surface_children: 49
+  near_child_scale_ratio: 0.22
+  very_near_child_scale_ratio: 0.16
+  surface_scale_min_factor: 0.10
+  surface_scale_max_factor: 2.0
+  surface_max_projected_sigma_px: 12.0
+  near_surface_projected_radius_px: 24.0
+  very_near_surface_projected_radius_px: 48.0
+  very_near_surface_min_residual: 0.08
+  depth_histogram_edges_m: [20.0, 50.0]
+  optimize_visible_roots_only: true
+  optimization_visibility_margin_px: 64.0
+  current_view_optimization_fraction: 0.0
+  newborn_optimization_iters: 0
+  max_promotions_per_frame: 64
+  max_refinements_per_frame: 32
+  max_optimized_roots_per_step: 0
+  post_refinement_optimize_progressive: false
+  post_refinement_merge_into_baseline: true
+  archive_after_unseen_frames: 100000
+  archive_dtype: "float16"
+  archive_to_cpu: true
+  enable_reactivation: true
+  reactivate_min_projected_radius_px: 10.0
+  max_projective_anchors: 15000
+  projective_prune_grace_frames: 30
+  projective_prune_stale_frames: 45
+  max_metric_roots: 50000
+  max_surface_gaussians: 600000
+  max_active_gaussians: 700000
+  projective_top_k_render_modes: 2
+  projective_base_opacity: 0.12
+  debug: false
+  debug_save_interval: 10

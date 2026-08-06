@@ -1,0 +1,71 @@
+inherit_from: "configs/aria/orb_tracking/aria_base.yaml"
+
+Dataset:
+  name: "AerialVLNS-scene10-10x"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_AirVLN/aerialvln_s_scene10_10x"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 0
+  max_pts_num: 5000
+  vignette: False
+  use_vignette_type: "post-render"
+  Calibration:
+    fx: 640.000000
+    fy: 640.000000
+    cx: 640.000000
+    cy: 360.000000
+    width: 1280
+    height: 720
+    near: 0.01
+    far: 1000
+
+
+Testset:
+  name: "AerialVLNS-scene10-10x"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_AirVLN/aerialvln_s_scene10_10x"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 0
+  max_pts_num: 5000
+  vignette: False
+  use_vignette_type: "post-render"
+  Calibration:
+    fx: 640.000000
+    fy: 640.000000
+    cx: 640.000000
+    cy: 360.000000
+    width: 1280
+    height: 720
+    near: 0.01
+    far: 1000
+
+
+Results:
+  save_dir: "./Logs_airvln"
+  save_gt: False
+  save_exr: False
+  save_mesh: False
+  skip_eval: True
+
+Mapper:
+  use_multi_reso: False
+  initialization_frames: 4
+  optimization_iters: 10
+  initialization_iters: 10
+  post_refinement:
+    max_steps: 100
+    opt_cam: False
+  KFGraph:
+    kf_interval: 3
+    global_window_size: 2
+  CameraOptimizer:
+    pose_refine_init_steps: 0
+    pose_opt_steps: 2
+
+Model:
+  camera_scale_rescalar: 0.25
+  scene_scale: 1.0

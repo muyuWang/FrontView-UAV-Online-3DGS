@@ -1,0 +1,15 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_pose_road_street1_smoke20.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-pose-edge025-smoke20"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-pose-edge025-smoke20"
+
+Mapper:
+  post_refinement:
+    pose_prepass_frequency_weight: 0.25
+    pose_prepass_gradient_threshold: 0.04
+    pose_prepass_edge_weight: 1.0
+    pose_prepass_side_start: 0.45
+    pose_prepass_side_boost: 2.0

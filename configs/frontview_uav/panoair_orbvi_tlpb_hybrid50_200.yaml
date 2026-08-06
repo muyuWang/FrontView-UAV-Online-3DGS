@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_hybrid20_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-hybrid50-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-hybrid50-200"
+
+FrontViewBirth:
+  near_hash_depth_m: 50.0

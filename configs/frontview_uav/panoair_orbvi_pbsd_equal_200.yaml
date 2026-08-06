@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_crwd_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-pbsd-equal-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-pbsd-equal-200"
+
+FrontViewSampling:
+  selection_mode: "depth_stratified"
+  depth_fractions: [0.33, 0.34, 0.33]

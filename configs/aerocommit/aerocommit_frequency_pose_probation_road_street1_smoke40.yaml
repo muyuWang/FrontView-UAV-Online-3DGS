@@ -1,0 +1,9 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_pose_probation_road_street1_smoke20.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-pose-probation-smoke40"
+  end_cutoff: 118
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-pose-probation-smoke40"
+  end_cutoff: 118

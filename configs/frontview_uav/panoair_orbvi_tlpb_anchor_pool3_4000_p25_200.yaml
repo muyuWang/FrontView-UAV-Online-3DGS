@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_anchor_pool3_4000_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-anchor-pool3-4000-p25-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-anchor-pool3-4000-p25-200"
+
+FrontViewBirth:
+  priority_fraction: 0.25

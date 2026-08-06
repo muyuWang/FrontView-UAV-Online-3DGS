@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_crwd_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-cdwd-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-cdwd-200"
+
+FrontViewSampling:
+  photo_mode: "disocclusion"

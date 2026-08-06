@@ -1,0 +1,25 @@
+inherit_from: "configs/aerocommit/baseline_road_street1_smoke20.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-immediate-smoke20"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-immediate-smoke20"
+
+AeroCommit:
+  enabled: true
+  mode: npo_gate
+  bootstrap_frames: 0
+  admission:
+    policy: immediate
+  commit_refinement:
+    enabled: false
+    force_new_group: false
+  detail_refinement:
+    enabled: false
+  budget:
+    enabled: false
+  archive:
+    enabled: false
+  debug:
+    enabled: false

@@ -1,0 +1,13 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_post_rr_freeze90_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-post-rr-mse25-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-post-rr-mse25-200"
+
+Mapper:
+  post_refinement:
+    appearance_mse_start_step: 90
+    appearance_mse_mix: 0.25
+    appearance_mse_scale: 1.0

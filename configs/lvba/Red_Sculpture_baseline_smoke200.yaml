@@ -1,0 +1,17 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/lvba/Red_Sculpture_baseline_full.yaml"
+
+Dataset:
+  name: "LVBA-Red_Sculpture-baseline-smoke200"
+  end_cutoff: 816
+
+Testset:
+  name: "LVBA-Red_Sculpture-baseline-smoke200"
+  end_cutoff: 816
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_lvba_quality"
+  skip_eval: true
+
+Mapper:
+  post_refinement:
+    max_steps: 300

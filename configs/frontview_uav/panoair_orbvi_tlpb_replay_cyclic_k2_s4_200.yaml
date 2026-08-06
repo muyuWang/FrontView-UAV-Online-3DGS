@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_replay_cyclic_k1_s4_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-replay-cyclic-k2-s4-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-replay-cyclic-k2-s4-200"
+
+Mapper:
+  KFGraph:
+    global_window_size: 2

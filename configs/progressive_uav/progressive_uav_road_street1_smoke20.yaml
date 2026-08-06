@@ -1,0 +1,9 @@
+inherit_from: "configs/progressive_uav/progressive_uav_road_street1.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-progressive-smoke20"
+  end_cutoff: 138
+
+Testset:
+  name: "HorizonGS-road-street1-progressive-smoke20"
+  end_cutoff: 138

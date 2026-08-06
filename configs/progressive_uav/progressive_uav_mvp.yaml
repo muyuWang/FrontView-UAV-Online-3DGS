@@ -1,0 +1,110 @@
+inherit_from: "configs/horizongs/HorizonGS_city_street_orb.yaml"
+
+Model:
+  gaussian_type: 2dgs
+
+Loss:
+  lambda_depth: 0.01
+  lambda_normal: 0.01
+  lambda_distortion: 0.01
+
+Mapper:
+  post_refinement:
+    max_steps: 0
+    opt_cam: false
+
+ProgressiveMapping:
+  enabled: true
+  bootstrap_frames: 5
+  replace_original_densification_after_bootstrap: true
+  use_keyframes_for_spawn: true
+  spawn_interval: 3
+  patch_size: 16
+  patch_stride: 16
+  descriptor_resize: 4
+  appearance_grid_size: 8
+  max_observations_per_frame: 1024
+  max_new_anchors_per_keyframe: 256
+  near_observation_depth_m: 30.0
+  near_observation_fraction: 0.60
+  near_spawn_fraction: 0.75
+  spawn_requires_valid_depth: false
+  candidate_opacity_threshold: 0.15
+  candidate_residual_threshold: 0.15
+  candidate_min_gradient: 0.01
+  num_inverse_depth_modes: 4
+  inverse_depth_log_offsets: [-0.7, -0.25, 0.25, 0.7]
+  association_radius_px: 12.0
+  association_feature_threshold: 0.35
+  association_photo_weight: 0.25
+  association_pixel_weight: 0.10
+  association_temperature: 0.10
+  minimum_probability_floor: 0.0001
+  descriptor_ema: 0.10
+  color_ema: 0.10
+  residual_ema: 0.10
+  promotion_min_observations: 3
+  promotion_min_best_weight: 0.70
+  promotion_max_normalized_entropy: 0.60
+  promotion_max_relative_std: 0.20
+  promotion_min_parallax_deg: 1.0
+  promotion_max_match_error: 0.30
+  near_promotion_max_depth_m: 30.0
+  near_promotion_min_observations: 2
+  near_promotion_min_best_weight: 0.50
+  near_promotion_max_normalized_entropy: 0.95
+  near_promotion_max_relative_std: 0.60
+  near_promotion_min_parallax_deg: 0.20
+  near_promotion_max_match_error: 0.45
+  near_inverse_depth_log_offsets: [-0.20, -0.05, 0.05, 0.20]
+  metric_merge_radius_factor: 0.75
+  metric_merge_feature_threshold: 0.80
+  metric_initial_opacity: 0.10
+  metric_scale_factor: 1.0
+  surface_initial_opacity_floor: 0.0
+  surface_opacity_min: 0.0
+  refine_min_observations: 4
+  refine_min_projected_radius_px: 12.0
+  refine_min_residual: 0.08
+  refine_min_confidence: 0.50
+  children_per_root: 4
+  child_scale_ratio: 0.55
+  near_surface_depth_m: 50.0
+  very_near_surface_depth_m: 25.0
+  near_surface_children: 9
+  very_near_surface_children: 16
+  near_child_scale_ratio: 0.38
+  very_near_child_scale_ratio: 0.30
+  near_surface_projected_radius_px: 24.0
+  very_near_surface_projected_radius_px: 48.0
+  very_near_surface_min_residual: 0.12
+  depth_histogram_edges_m: [20.0, 50.0]
+  enable_center_regularization: true
+  center_regularization_weight: 0.01
+  center_regularization_allowed_factor: 1.5
+  optimize_visible_roots_only: false
+  optimization_visibility_margin_px: 32.0
+  current_view_optimization_fraction: 0.0
+  newborn_optimization_iters: 0
+  max_promotions_per_frame: 0
+  max_refinements_per_frame: 0
+  max_optimized_roots_per_step: 0
+  means_lr_multiplier: 1.0
+  scales_lr_multiplier: 1.0
+  quats_lr_multiplier: 1.0
+  appearance_lr_multiplier: 1.0
+  archive_after_unseen_frames: 30
+  archive_dtype: float16
+  archive_to_cpu: true
+  enable_reactivation: true
+  reactivate_min_projected_radius_px: 10.0
+  max_projective_anchors: 5000
+  projective_prune_grace_frames: 20
+  projective_prune_stale_frames: 40
+  max_metric_roots: 50000
+  max_surface_gaussians: 300000
+  max_active_gaussians: 400000
+  projective_top_k_render_modes: 2
+  projective_base_opacity: 0.08
+  debug: true
+  debug_save_interval: 10

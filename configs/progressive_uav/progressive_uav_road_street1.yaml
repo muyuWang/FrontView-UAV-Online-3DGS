@@ -1,0 +1,130 @@
+inherit_from: "configs/progressive_uav/progressive_uav_mvp.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-progressive"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_HorizonGS/road_street1"
+  Calibration:
+    fx: 619.886262
+    fy: 619.886262
+    cx: 808.910311
+    cy: 446.748666
+    width: 1600
+    height: 896
+    near: 0.01
+    far: 1000
+
+Testset:
+  name: "HorizonGS-road-street1-progressive"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_HorizonGS/road_street1"
+  Calibration:
+    fx: 619.886262
+    fy: 619.886262
+    cx: 808.910311
+    cy: 446.748666
+    width: 1600
+    height: 896
+    near: 0.01
+    far: 1000
+
+Results:
+  save_dir: "./Logs_progressive_uav"
+  skip_eval: true
+
+Mapper:
+  device: "cuda:0"
+  optimization_iters: 16
+  initialization_iters: 40
+  coarse_active_window_size: 0
+  coarse_pool_size: 0
+  KFGraph:
+    global_window_size: 4
+  CameraOptimizer:
+    device: "cuda:0"
+    use_camera_opt: false
+    pose_refine_init_steps: 0
+    pose_opt_steps: 0
+
+Loss:
+  device: "cuda:0"
+
+Model:
+  device: "cuda:0"
+
+ProgressiveMapping:
+  replace_original_densification_after_bootstrap: false
+  patch_size: 24
+  patch_stride: 14
+  max_observations_per_frame: 1536
+  max_new_anchors_per_keyframe: 256
+  near_observation_depth_m: 30.0
+  near_observation_fraction: 0.70
+  near_spawn_fraction: 0.85
+  spawn_requires_valid_depth: true
+  association_radius_px: 18.0
+  association_feature_threshold: 0.50
+  max_projective_anchors: 15000
+  projective_prune_grace_frames: 30
+  projective_prune_stale_frames: 45
+  promotion_min_best_weight: 0.55
+  promotion_max_normalized_entropy: 0.80
+  promotion_max_relative_std: 0.45
+  promotion_min_parallax_deg: 0.35
+  promotion_max_match_error: 0.40
+  near_promotion_max_depth_m: 50.0
+  near_promotion_min_observations: 2
+  near_promotion_min_best_weight: 0.30
+  near_promotion_max_normalized_entropy: 0.98
+  near_promotion_max_relative_std: 0.75
+  near_promotion_min_parallax_deg: 0.10
+  near_promotion_max_match_error: 0.65
+  enable_sparse_plane_initialization: false
+  sparse_plane_min_points: 5
+  sparse_plane_depth_mad_scale: 3.0
+  sparse_plane_min_relative_depth_band: 0.10
+  sparse_plane_max_relative_rmse: 0.01
+  sparse_plane_min_confidence: 0.70
+  sparse_plane_min_uv_variance: 4.0
+  sparse_plane_max_tilt_deg: 70.0
+  sparse_plane_max_scale_multiplier: 1.25
+  enable_metric_depth_correction: false
+  metric_correction_min_depth_support: 2
+  metric_correction_max_pixel_error_px: 12.0
+  metric_correction_max_feature_error: 0.30
+  metric_correction_max_relative_depth_error: 0.45
+  metric_correction_max_relative_uncertainty: 0.15
+  metric_correction_ema: 0.50
+  metric_correction_min_updates_for_refine: 0
+  metric_correction_max_wait_frames: 0
+  children_per_root: 9
+  child_scale_ratio: 0.40
+  near_surface_depth_m: 60.0
+  very_near_surface_depth_m: 30.0
+  near_surface_children: 49
+  very_near_surface_children: 81
+  near_child_scale_ratio: 0.18
+  very_near_child_scale_ratio: 0.14
+  surface_scale_min_factor: 0.65
+  surface_scale_max_factor: 1.25
+  surface_max_projected_sigma_px: 4.0
+  near_surface_projected_radius_px: 24.0
+  very_near_surface_projected_radius_px: 48.0
+  very_near_surface_min_residual: 0.08
+  depth_histogram_edges_m: [20.0, 50.0]
+  metric_initial_opacity: 0.20
+  surface_initial_opacity_floor: 0.12
+  surface_opacity_min: 0.08
+  optimize_visible_roots_only: true
+  optimization_visibility_margin_px: 64.0
+  current_view_optimization_fraction: 0.625
+  newborn_optimization_iters: 2
+  max_promotions_per_frame: 96
+  max_refinements_per_frame: 64
+  max_optimized_roots_per_step: 768
+  means_lr_multiplier: 20.0
+  scales_lr_multiplier: 2.0
+  quats_lr_multiplier: 10.0
+  appearance_lr_multiplier: 2.0
+  max_surface_gaussians: 600000
+  max_active_gaussians: 700000
+  archive_after_unseen_frames: 45
+  projective_base_opacity: 0.12

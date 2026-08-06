@@ -1,0 +1,10 @@
+inherit_from: "configs/panoair_preprocess/orbslam3_vi_fused_baseline_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-modp-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-modp-200"
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_frontview_uav"

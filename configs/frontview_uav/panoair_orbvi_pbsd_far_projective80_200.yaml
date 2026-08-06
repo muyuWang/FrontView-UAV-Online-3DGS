@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pbsd_far_projective20_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-pbsd-far-projective80-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-pbsd-far-projective80-200"
+
+FrontViewFarField:
+  depth_m: 80.0

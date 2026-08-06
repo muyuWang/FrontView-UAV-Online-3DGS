@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_layer_budget_pool3_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-layer-budget-pool3-bounded2-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-layer-budget-pool3-bounded2-200"
+
+FrontViewBirth:
+  overflow_max_per_cell: 2

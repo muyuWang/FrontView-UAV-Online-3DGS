@@ -1,0 +1,42 @@
+inherit_from: "configs/aerocommit/baseline_road_street1_smoke20.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-npo-gate-smoke20"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-npo-gate-smoke20"
+
+AeroCommit:
+  enabled: true
+  mode: npo_gate
+  bootstrap_frames: 5
+  admission:
+    policy: npo_lite
+    trusted_sparse_fast_path: true
+    gate_interval: 1
+    max_risk_candidates_per_keyframe: 128
+    min_support: 3
+    max_support_edges: 4
+    candidate_group_cell_px: 128
+    candidate_group_log_depth_bin: 0.50
+    max_candidate_groups_per_frame: 320
+    max_candidate_bank_size: 3000
+    association_radius_px: 32.0
+    association_descriptor_threshold: 0.65
+    association_relative_depth_threshold: 1.0
+    risk_threshold: 0.20
+    minimum_sanity_parallax_deg: 0.20
+    side_quota_fraction: 0.40
+  commit_refinement:
+    enabled: false
+    max_commits_per_keyframe: 128
+    force_new_group: true
+  detail_refinement:
+    enabled: false
+  budget:
+    enabled: false
+  archive:
+    enabled: false
+  debug:
+    enabled: true
+    save_interval: 10

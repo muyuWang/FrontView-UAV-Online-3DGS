@@ -1,0 +1,9 @@
+inherit_from: "configs/horizongs/HorizonGS_road_street1_orb.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-baseline-short"
+  end_cutoff: 118
+
+Testset:
+  name: "HorizonGS-road-street1-baseline-short"
+  end_cutoff: 118

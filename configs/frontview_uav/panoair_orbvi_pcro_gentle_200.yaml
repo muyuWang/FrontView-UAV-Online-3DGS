@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pcro_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-pcro-gentle-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-pcro-gentle-200"
+
+FrontViewObservability:
+  min_ray_lr_scale: 0.50

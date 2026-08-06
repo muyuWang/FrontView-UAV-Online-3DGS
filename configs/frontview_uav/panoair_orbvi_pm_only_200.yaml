@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pmsa_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-pm-only-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-pm-only-200"
+
+# Mechanism control: retain causal P -> M evidence accumulation and promotion,
+# but disable M -> S surface expansion.
+ProgressiveMapping:
+  admission_only: true

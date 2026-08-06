@@ -1,0 +1,29 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_pose_appearance20_road_street1_smoke40.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-sparse-flow-detail-smoke40"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-sparse-flow-detail-smoke40"
+
+AeroCommit:
+  flow_detail:
+    enabled: true
+    start_frame: 20
+    side_start: 0.35
+    vertical_start: 0.20
+    near_depth_m: 60.0
+    max_corners: 2500
+    quality_level: 0.005
+    min_corner_distance_px: 3.0
+    forward_backward_threshold_px: 1.0
+    min_parallax_deg: 0.20
+    max_parallax_deg: 10.0
+    color_consistency_threshold: 0.20
+    voxel_size: 0.05
+    projected_scale_px: 0.60
+    initial_opacity: 0.30
+    max_scale_expansion: 1.25
+    max_commits_per_frame: 384
+    max_total_gaussians: 8000
+    freeze_geometry: true

@@ -1,0 +1,16 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/lvba/Red_Sculpture_worldtest_smoke200.yaml"
+
+Dataset:
+  name: "LVBA-Red_Sculpture-lidar-fastpath-smoke200"
+
+Testset:
+  name: "LVBA-Red_Sculpture-lidar-fastpath-smoke200"
+
+AeroCommit:
+  admission:
+    trusted_sparse_fast_path: true
+    fast_path_max_gaussians_per_frame: 1200
+    fast_path_initial_opacity: 0.25
+
+WorldTestGS:
+  enabled: false

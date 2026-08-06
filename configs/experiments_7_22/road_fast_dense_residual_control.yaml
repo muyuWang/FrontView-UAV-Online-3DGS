@@ -1,0 +1,11 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/experiments_7_22/road_fast_equal_capacity_modp_input.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-fast-dense-residual-control"
+
+Testset:
+  name: "HorizonGS-road-street1-fast-dense-residual-control"
+
+Model:
+  err_threshold: 0.05
+  extra_pts_num: 3200

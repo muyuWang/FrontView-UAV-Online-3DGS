@@ -1,0 +1,18 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_pose_appearance20_road_street1_smoke40.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-responsibility-replay-smoke40"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-responsibility-replay-smoke40"
+
+Mapper:
+  post_refinement:
+    max_steps: 400
+    all_frame_hard_fraction: 0.75
+    all_frame_hard_warmup_steps: 40
+    all_frame_frequency_error_weight: 1.0
+    all_frame_frequency_gradient_threshold: 0.035
+    all_frame_frequency_side_start: 0.35
+    appearance_only_start_step: 360
+    detail_loss_start_step: 320

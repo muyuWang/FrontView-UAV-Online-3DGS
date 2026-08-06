@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_layer_budget_pool3_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-layer-budget-pool4-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-layer-budget-pool4-200"
+
+FrontViewBirth:
+  pool_multiplier: 4

@@ -1,0 +1,11 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/experiments_7_22/road_fast_multiview_control.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-multiview-iter15-control"
+
+Testset:
+  name: "HorizonGS-road-street1-multiview-iter15-control"
+
+Mapper:
+  initialization_iters: 15
+  optimization_iters: 15

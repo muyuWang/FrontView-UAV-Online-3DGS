@@ -1,0 +1,79 @@
+inherit_from: "configs/aria/orb_tracking/aria_base.yaml"
+
+Results:
+  save_dir: "./Logs_smoke"
+  save_gt: False
+  save_exr: False
+  save_mesh: False
+  skip_eval: True
+
+Mapper:
+  device: "cuda:0"
+  active_window_size: 1
+  coarse_active_window_size: 1
+  coarse_level_interval: 5
+  coarse_pool_size: 2
+  add_gaussians_interval: 0
+  prune_interval: 100000000
+  initialization_frames: 2
+  group_max_gaussian_frames: 100000000
+  save_model_interval: 100000000
+  use_multi_reso: False
+  use_dataset: True
+  pin_kf_gpu: True
+  optimization_iters: 1
+  initialization_iters: 1
+  KFGraph:
+    global_window_size: 1
+    kf_interval: 1
+  CameraOptimizer:
+    pose_refine_init_steps: 0
+    pose_opt_steps: 0
+  post_refinement:
+    max_steps: 0
+    opt_cam: False
+
+Model:
+  extra_pts_num: 64
+
+Dataset:
+  name: "Bike-Shop-orb-smoke"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Aria_Data_cleaned/Bike-Shop"
+  num_threads: 0
+  begin_cutoff: 22
+  end_cutoff: 1053
+  max_pts_num: 512
+  vignette: True
+  use_vignette_type: "post-render"
+  Calibration:
+    fx: 400
+    fy: 400
+    cx: 400
+    cy: 400
+    width: 800
+    height: 800
+    near: 0.01
+    far: 1000
+
+Testset:
+  name: "Bike-Shop-orb-smoke"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Aria_Data_cleaned/Bike-Shop"
+  num_threads: 0
+  begin_cutoff: 22
+  end_cutoff: 1053
+  max_pts_num: 512
+  vignette: True
+  use_vignette_type: "post-render"
+  Calibration:
+    fx: 400
+    fy: 400
+    cx: 400
+    cy: 400
+    width: 800
+    height: 800
+    near: 0.01
+    far: 1000

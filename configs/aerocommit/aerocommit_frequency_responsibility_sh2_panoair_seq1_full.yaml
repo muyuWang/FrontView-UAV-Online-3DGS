@@ -1,0 +1,66 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_responsibility_sh2_road_street1_full.yaml"
+
+Dataset:
+  name: "PanoAir-seq1-aerocommit-frequency-responsibility-sh2-full"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1_colmap_consistent"
+  begin_cutoff: 0
+  end_cutoff: 0
+  stride: 1
+  max_pts_num: 5000
+  Calibration:
+    fx: 320.0
+    fy: 320.0
+    cx: 480.0
+    cy: 320.0
+    width: 960
+    height: 640
+    near: 0.05
+    far: 120.0
+
+Testset:
+  name: "PanoAir-seq1-aerocommit-frequency-responsibility-sh2-full"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1_colmap_consistent"
+  begin_cutoff: 0
+  end_cutoff: 0
+  stride: 1
+  max_pts_num: 5000
+  Calibration:
+    fx: 320.0
+    fy: 320.0
+    cx: 480.0
+    cy: 320.0
+    width: 960
+    height: 640
+    near: 0.05
+    far: 120.0
+
+Mapper:
+  # PanoAir has 2368 frames at 960x640; keep image/depth pyramids on CPU and
+  # transfer only the bounded optimization batch to avoid linear GPU growth.
+  pin_kf_gpu: false
+
+AeroCommit:
+  admission:
+    # This sequence uses one persistent COLMAP world frame. Dense monocular
+    # depths become inconsistent during takeoff, so they may fill genuinely
+    # unseen regions but cannot create a second surface over stable geometry.
+    trusted_depthcov_fast_path: false
+    allow_depthcov_candidates: true
+    depthcov_candidate_stable_depth_ratio: 0.25
+    fast_path_max_gaussians_per_frame: 1200
+    fast_path_frequency_fraction: 0.65
+    fast_path_group_frames: 20
+    fast_path_initial_opacity: 0.25
+  commit_refinement:
+    group_chunk_keyframes: 20
+  archive:
+    enable_reactivation: false
+
+Model:
+  init_gaussian_config:
+    # Prevent single-view ground splats from expanding into vertical curtains
+    # when the drone gains altitude.
+    max_scale_expansion: 2.0
+  frequency_sampling:
+    # Avoid the sub-pixel unproject/reproject drift of persistent SfM points.
+    preserve_sparse_track_geometry: true

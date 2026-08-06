@@ -1,0 +1,9 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_responsibility_sh2_road_street1_smoke40.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-responsibility-sh2-full"
+  end_cutoff: -1
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-responsibility-sh2-full"
+  end_cutoff: -1

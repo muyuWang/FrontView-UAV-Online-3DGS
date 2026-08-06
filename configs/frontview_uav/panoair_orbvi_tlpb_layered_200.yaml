@@ -1,0 +1,22 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pbsd_uav_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-layered-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-layered-200"
+
+FrontViewSampling:
+  enabled: false
+
+FrontViewBirth:
+  enabled: true
+  pool_multiplier: 2
+  projective_cell_px: 12
+  depth_bin_ratio: 1.10
+  max_per_cell: 1
+  map_competition: true
+  explained_opacity: 0.65
+  depth_consistency_ratio: 0.06
+  residual_override: 0.16
+  far_scale_control: false

@@ -1,0 +1,43 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/aria/orb_tracking/aria_base.yaml"
+
+Dataset:
+  name: "LVBA-Red_Sculpture-baseline-full"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_LVBA/Red_Sculpture"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 0
+  stride: 1
+  max_pts_num: -1
+  vignette: false
+  use_vignette_type: "post-render"
+  Calibration: &red_sculpture_calibration
+    fx: 646.784720
+    fy: 646.657750
+    cx: 313.456795
+    cy: 261.399612
+    width: 640
+    height: 512
+    near: 0.10
+    far: 120.0
+
+Testset:
+  name: "LVBA-Red_Sculpture-baseline-full"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_LVBA/Red_Sculpture"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 0
+  stride: 1
+  max_pts_num: -1
+  vignette: false
+  use_vignette_type: "post-render"
+  Calibration: *red_sculpture_calibration
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_lvba_baseline"
+  save_gt: true
+  save_exr: false
+  save_mesh: false

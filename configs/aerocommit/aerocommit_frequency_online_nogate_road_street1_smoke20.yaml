@@ -1,0 +1,11 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_sampling_sh1_road_street1_smoke20.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-online-nogate-smoke20"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-online-nogate-smoke20"
+
+AeroCommit:
+  commit_refinement:
+    newborn_optimization_iters: 1

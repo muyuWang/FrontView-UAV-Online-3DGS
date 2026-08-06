@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_layered_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-layered-scale-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-layered-scale-200"
+
+FrontViewBirth:
+  far_scale_control: true
+  far_depth_quantile: 0.75
+  far_max_scale_expansion: 2.0

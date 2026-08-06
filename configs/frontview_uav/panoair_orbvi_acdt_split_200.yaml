@@ -1,0 +1,18 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pbsd_uav_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-acdt-split-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-acdt-split-200"
+
+FrontViewDepthTransport:
+  enabled: true
+  apply_correction: false
+  calibration_fraction: 0.10
+  min_training_anchors: 32
+  min_calibration_anchors: 8
+  neighbors: 8
+  clip_quantiles: [0.10, 0.90]
+  shuffle_residual_locations: false
+  split_seed: 42

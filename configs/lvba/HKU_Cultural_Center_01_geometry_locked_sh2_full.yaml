@@ -1,0 +1,36 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/lvba/Red_Sculpture_geometry_locked_sh2_full.yaml"
+
+Dataset:
+  name: "LVBA-HKU_Cultural_Center_01-geometry-locked-sh2-full"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_LVBA/HKU_Cultural_Center_01"
+  begin_cutoff: 0
+  end_cutoff: 0
+  stride: 1
+  max_pts_num: -1
+  Calibration: &hku_cultural_center_01_calibration
+    fx: 646.784720
+    fy: 646.657750
+    cx: 313.456795
+    cy: 261.399612
+    width: 640
+    height: 512
+    near: 0.10
+    far: 120.0
+
+Testset:
+  name: "LVBA-HKU_Cultural_Center_01-geometry-locked-sh2-full"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_LVBA/HKU_Cultural_Center_01"
+  begin_cutoff: 0
+  end_cutoff: 0
+  stride: 1
+  max_pts_num: -1
+  Calibration: *hku_cultural_center_01_calibration
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_lvba_quality"
+  skip_eval: true
+
+Mapper:
+  # Keep the full keyframe set, but stage image/depth pyramids through CPU so
+  # long sequences do not accumulate several GB of inactive camera tensors.
+  pin_kf_gpu: false

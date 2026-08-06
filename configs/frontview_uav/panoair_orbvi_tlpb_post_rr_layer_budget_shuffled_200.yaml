@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_post_rr_layer_budget_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-post-rr-layer-budget-shuffled-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-post-rr-layer-budget-shuffled-200"
+
+FrontViewBirth:
+  shuffle_layer_assignments: true

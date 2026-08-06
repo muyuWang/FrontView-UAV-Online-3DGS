@@ -1,0 +1,58 @@
+inherit_from: "/home/wmy/workspace_vla/modp_raw/configs/aria/orb_tracking/aria_base.yaml"
+
+Dataset:
+  name: "PanoAir-preprocess-orbslam3-vi-fused-baseline-200"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1_orbslam3_mono_vi_fused_472_v2"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 272
+  stride: 1
+  max_pts_num: -1
+  vignette: False
+  use_vignette_type: "post-render"
+  Calibration:
+    fx: 320.0
+    fy: 320.0
+    cx: 480.0
+    cy: 320.0
+    width: 960
+    height: 640
+    near: 0.05
+    far: 120.0
+
+Testset:
+  name: "PanoAir-preprocess-orbslam3-vi-fused-baseline-200"
+  type: "aria"
+  data_source: "orb"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1_orbslam3_mono_vi_fused_472_v2"
+  num_threads: 0
+  begin_cutoff: 0
+  end_cutoff: 272
+  stride: 1
+  max_pts_num: -1
+  vignette: False
+  use_vignette_type: "post-render"
+  Calibration:
+    fx: 320.0
+    fy: 320.0
+    cx: 480.0
+    cy: 320.0
+    width: 960
+    height: 640
+    near: 0.05
+    far: 120.0
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_panoair_preprocess"
+  save_gt: False
+  save_exr: False
+  save_mesh: False
+
+Mapper:
+  optimization_iters: 10
+  initialization_iters: 10
+  post_refinement:
+    max_steps: 100
+    opt_cam: False

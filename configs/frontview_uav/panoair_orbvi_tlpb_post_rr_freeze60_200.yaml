@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_post_range_rr_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-post-rr-freeze60-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-post-rr-freeze60-200"
+
+Mapper:
+  post_refinement:
+    appearance_only_start_step: 60
+    appearance_freeze_scales: true

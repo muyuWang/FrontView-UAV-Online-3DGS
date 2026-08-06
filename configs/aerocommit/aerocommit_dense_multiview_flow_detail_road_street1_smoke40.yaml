@@ -1,0 +1,20 @@
+inherit_from: "configs/aerocommit/aerocommit_multiview_flow_detail_road_street1_smoke40.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-dense-multiview-flow-detail-smoke40"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-dense-multiview-flow-detail-smoke40"
+
+AeroCommit:
+  flow_detail:
+    max_corners: 8000
+    quality_level: 0.001
+    min_corner_distance_px: 1.5
+    reprojection_threshold_px: 1.0
+    color_consistency_threshold: 0.15
+    voxel_size: 0.05
+    projected_scale_px: 0.75
+    initial_opacity: 0.50
+    max_commits_per_frame: 768
+    max_total_gaussians: 14000

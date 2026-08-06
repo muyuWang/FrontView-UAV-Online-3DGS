@@ -1,0 +1,12 @@
+inherit_from: "configs/aerocommit/aerocommit_frequency_pose_appearance_road_street1_smoke40.yaml"
+
+Dataset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-pose-appearance20-smoke40"
+
+Testset:
+  name: "HorizonGS-road-street1-aerocommit-frequency-pose-appearance20-smoke40"
+
+Mapper:
+  post_refinement:
+    appearance_only_start_step: 180
+    detail_loss_start_step: 180

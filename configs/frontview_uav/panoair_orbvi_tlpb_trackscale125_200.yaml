@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tlpb_mix50_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tlpb-trackscale125-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tlpb-trackscale125-200"
+
+FrontViewBirth:
+  track_refinement_ratio: 1.25
