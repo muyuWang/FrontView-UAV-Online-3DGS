@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_cpal75_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-cpal75-shuffled-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-cpal75-shuffled-full"
+
+StreamingAppearanceLOD:
+  selection_mode: "shuffled"

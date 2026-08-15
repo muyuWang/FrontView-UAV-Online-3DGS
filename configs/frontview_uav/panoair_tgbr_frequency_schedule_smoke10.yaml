@@ -1,0 +1,20 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_compute_routed_fp16_smoke10.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-frequency-schedule-smoke10"
+
+Testset:
+  name: "PanoAir-tgbr-frequency-schedule-smoke10"
+
+StreamingAppearanceLOD:
+  max_target_fraction: 0.60
+  compute_routing_warmup_evidence_updates: 0
+  frequency_schedule_enabled: true
+  frequency_schedule_warmup_evidence_updates: 0
+  frequency_schedule_base_level_weights: [1.0, 0.0, 0.0, 0.0]
+  frequency_schedule_inactive_gain: 0.75
+  frequency_schedule_min_full_fraction: 0.70
+  frequency_schedule_reallocation_level: 2
+  frequency_schedule_coarse_sh_degree: 2
+  frequency_schedule_full_anchor_steps: 1
+  frequency_schedule_full_tail_steps: 2

@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_frequency_schedule_evidence_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-frequency-schedule-shuffled-200"
+
+Testset:
+  name: "PanoAir-tgbr-frequency-schedule-shuffled-200"
+
+StreamingAppearanceLOD:
+  selection_mode: "gradient_shuffled"

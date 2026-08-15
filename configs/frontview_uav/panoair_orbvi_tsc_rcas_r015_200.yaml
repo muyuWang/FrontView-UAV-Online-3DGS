@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_r0p3_color15_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-rcas-r015-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-rcas-r015-200"
+
+FrontViewScaleCover:
+  appearance_certificate_enabled: true
+  appearance_min_residual: 0.15
+  appearance_min_depth_confidence: 0.0

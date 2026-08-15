@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_rift_footprint_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-rift-footprint-dense-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-rift-footprint-dense-200"
+
+FrontViewIdentityLOD:
+  lod_cell_px: 2.5
+  lod_capacity_radius_px: 2.5
+  max_children_per_node: 24

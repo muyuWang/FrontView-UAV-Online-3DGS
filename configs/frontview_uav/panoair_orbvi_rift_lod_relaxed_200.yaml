@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_rift_lod_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-rift-lod-relaxed-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-rift-lod-relaxed-200"
+
+FrontViewIdentityLOD:
+  depth_ratio: 1.10
+  min_lod_radius_px: 4.0
+  min_lod_residual: 0.05

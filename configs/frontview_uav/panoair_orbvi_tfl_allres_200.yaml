@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tfl_dense_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tfl-allres-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tfl-allres-200"
+
+FrontViewIdentityLOD:
+  min_lod_residual: 0.0

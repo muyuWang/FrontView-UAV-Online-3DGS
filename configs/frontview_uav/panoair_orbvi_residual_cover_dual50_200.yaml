@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_residual_cover_wide_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-residual-cover-dual50-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-residual-cover-dual50-200"
+
+FrontViewResidualCover:
+  edge_gain_weight: 0.50

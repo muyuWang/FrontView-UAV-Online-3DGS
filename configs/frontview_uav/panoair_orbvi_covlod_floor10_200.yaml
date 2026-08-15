@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_covlod_strict_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-covlod-floor10-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-covlod-floor10-200"
+
+FrontViewResidualCover:
+  covariance_duplicate_floor: 0.10

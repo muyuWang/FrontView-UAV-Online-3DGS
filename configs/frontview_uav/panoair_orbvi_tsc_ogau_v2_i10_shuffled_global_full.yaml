@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_ogau_v2_i10_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-ogau-v2-i10-shuffled-global-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-ogau-v2-i10-shuffled-global-full"
+
+StreamingAppearanceLOD:
+  selection_mode: "shuffled_global"

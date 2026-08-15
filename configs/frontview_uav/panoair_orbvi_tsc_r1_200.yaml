@@ -1,0 +1,19 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pbsd_far_projective80_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-r1-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-r1-200"
+
+HashBlock:
+  use_hash: false
+
+FrontViewScaleCover:
+  enabled: true
+  radius_multiplier: 1.0
+  scale_compatibility: 1.0
+  neighbors: 32
+  rebuild_rows: 8192
+  shuffle_occupancy: false
+  shuffle_seed: 42

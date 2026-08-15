@@ -1,0 +1,13 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_rift_footprint_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tfl-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tfl-200"
+
+FrontViewIdentityLOD:
+  mode: "frustum_lattice"
+  shuffle_identity: false
+  lod_capacity_radius_px: 3.0
+  max_children_per_node: 16

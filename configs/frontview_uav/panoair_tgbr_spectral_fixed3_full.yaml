@@ -1,0 +1,18 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_tgbr75_sh3_full.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-spectral-fixed3-full"
+
+Testset:
+  name: "PanoAir-tgbr-spectral-fixed3-full"
+
+StreamingAppearanceLOD:
+  exact_replay_microbatch_size: 3
+  spectral_replay_enabled: false
+  bounded_replay_residency_enabled: false
+
+CudaMemoryProfile:
+  enabled: true
+
+Results:
+  skip_eval: true

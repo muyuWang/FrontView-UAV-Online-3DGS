@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_residency_dynamic_full.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-residency-k48-full"
+
+Testset:
+  name: "PanoAir-tgbr-residency-k48-full"
+
+StreamingAppearanceLOD:
+  spectral_residency_basis_budget: 684.0
+  spectral_residency_max_views: 64

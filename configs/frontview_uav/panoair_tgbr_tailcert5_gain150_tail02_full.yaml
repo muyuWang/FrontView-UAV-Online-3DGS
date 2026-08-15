@@ -1,0 +1,14 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_tailcert5_gain150_tail02_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-tailcert5-gain150-tail02-full"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1_orbslam3_mono_vi_fused_full_v1"
+  end_cutoff: 0
+
+Testset:
+  name: "PanoAir-tgbr-tailcert5-gain150-tail02-full"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1_orbslam3_mono_vi_fused_full_v1"
+  end_cutoff: 0
+
+Results:
+  skip_eval: true

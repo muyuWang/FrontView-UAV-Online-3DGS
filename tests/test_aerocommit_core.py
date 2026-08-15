@@ -52,6 +52,45 @@ def proposal(uv=(32.0, 32.0), depth=5.0, residual=0.1, count=2):
     )
 
 
+def test_proposal_responsibility_coordinates_default_to_metric_coordinates():
+    proposals = proposal(count=3)
+    np.testing.assert_array_equal(
+        proposals.responsibility_depths, proposals.depths
+    )
+    np.testing.assert_array_equal(
+        proposals.responsibility_world_points, proposals.world_points
+    )
+    np.testing.assert_array_equal(
+        proposals.responsibility_log_scales, proposals.log_scales
+    )
+
+
+def test_proposal_selection_and_concatenation_preserve_responsibility_coordinates():
+    proposals = proposal(count=3)
+    proposals.responsibility_depths = np.asarray([11.0, 22.0, 33.0], dtype=np.float32)
+    proposals.responsibility_world_points = (
+        proposals.world_points + np.asarray([0.0, 0.0, 5.0], dtype=np.float32)
+    )
+    proposals.responsibility_log_scales = proposals.log_scales + 0.25
+    proposals.responsibility_cover_sizes = proposals.cover_sizes * 2.0
+    proposals.responsibility_view_directions = np.flip(
+        proposals.view_directions, axis=1
+    ).copy()
+    selected = proposals.select([2, 0])
+    combined = GaussianProposalBatch.concatenate(
+        [selected.select([0]), selected.select([1])], source_frame_id=9
+    )
+    assert combined.responsibility_depths.tolist() == [33.0, 11.0]
+    np.testing.assert_array_equal(
+        combined.responsibility_world_points,
+        proposals.responsibility_world_points[[2, 0]],
+    )
+    np.testing.assert_array_equal(
+        combined.responsibility_log_scales,
+        proposals.responsibility_log_scales[[2, 0]],
+    )
+
+
 def camera_pose(center_x=0.0):
     pose = np.eye(4, dtype=np.float32)
     pose[0, 3] = -center_x

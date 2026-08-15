@@ -1,0 +1,19 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_r0p3_color15_sh2_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-cpal50-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-cpal50-200"
+
+StreamingAppearanceLOD:
+  enabled: true
+  birth_degree: 1
+  target_degree: 2
+  min_views: 2
+  min_mean_radius: 0.5
+  min_angular_dispersion: 0.0
+  max_target_fraction: 0.5
+  promotion_interval: 10
+  selection_mode: "evidence"
+  shuffle_seed: 43

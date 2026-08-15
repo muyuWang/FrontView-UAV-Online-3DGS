@@ -1,0 +1,13 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_directional_views_a_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-directional-views-percentile-200"
+
+Testset:
+  name: "PanoAir-tgbr-directional-views-percentile-200"
+
+StreamingAppearanceLOD:
+  directional_view_budget_selection_mode: "percentile"
+  directional_view_budget_percentile_window: 64
+  directional_view_budget_percentile_very_low_fraction: 0.30
+  directional_view_budget_percentile_low_fraction: 0.40

@@ -1,0 +1,14 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_pqr_sh2_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-pcpr-sh2-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-pcpr-sh2-full"
+
+FrontViewScaleCover:
+  projective_revisit_gate: "pose"
+  revisit_min_frame_gap: 60
+  revisit_max_position_distance_m: 2.0
+  revisit_max_view_angle_deg: 15.0
+  revisit_min_cumulative_turn_deg: 90.0

@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_r0p3_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-dpcs-c8-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-dpcs-c8-200"
+
+FrontViewSampling:
+  selection_mode: "projective_coverage"
+  projective_cell_px: 8

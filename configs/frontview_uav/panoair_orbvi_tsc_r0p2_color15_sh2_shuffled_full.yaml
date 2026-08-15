@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_sh2_r0p2_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-r0p2-color15-sh2-shuffled-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-r0p2-color15-sh2-shuffled-full"
+
+FrontViewScaleCover:
+  shuffle_occupancy: true

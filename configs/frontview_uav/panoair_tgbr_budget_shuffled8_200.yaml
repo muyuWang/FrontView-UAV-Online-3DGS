@@ -1,0 +1,13 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_tgbr75_sh3_shuffled_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-budget-shuffled8-200"
+
+Testset:
+  name: "PanoAir-tgbr-budget-shuffled8-200"
+
+Mapper:
+  optimization_iters: 8
+
+Results:
+  skip_eval: true

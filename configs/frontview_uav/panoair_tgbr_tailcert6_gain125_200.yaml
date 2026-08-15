@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_tailcert6_gain_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-tailcert6-gain125-200"
+
+Testset:
+  name: "PanoAir-tgbr-tailcert6-gain125-200"
+
+StreamingAppearanceLOD:
+  optimization_budget_tail_gain_factor: 1.25

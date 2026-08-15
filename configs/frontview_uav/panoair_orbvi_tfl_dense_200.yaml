@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tfl_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tfl-dense-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tfl-dense-200"
+
+FrontViewIdentityLOD:
+  lod_capacity_radius_px: 2.5
+  max_children_per_node: 24

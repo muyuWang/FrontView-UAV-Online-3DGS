@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pbsd_far_projective80_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-pbsd-far-projective80-4000-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-pbsd-far-projective80-4000-200"
+
+Model:
+  extra_pts_num: 4000

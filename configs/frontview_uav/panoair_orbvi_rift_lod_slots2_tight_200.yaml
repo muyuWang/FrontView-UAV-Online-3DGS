@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_rift_lod_slots2_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-rift-lod-slots2-tight-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-rift-lod-slots2-tight-200"
+
+FrontViewIdentityLOD:
+  max_image_gate_px: 8.0
+  radius_gate_scale: 0.60
+  depth_ratio: 1.06

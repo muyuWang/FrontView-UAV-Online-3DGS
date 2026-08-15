@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_vial_c16_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-vial-c24-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-vial-c24-200"
+
+FrontViewSampling:
+  anchor_cell_px: 24

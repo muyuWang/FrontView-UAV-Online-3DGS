@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_rcas_track_r015_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-rcas-track-r015-shuffled-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-rcas-track-r015-shuffled-full"
+
+FrontViewScaleCover:
+  shuffle_appearance_certificates: true

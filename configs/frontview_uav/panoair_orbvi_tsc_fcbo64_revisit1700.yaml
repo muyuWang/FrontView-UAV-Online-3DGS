@@ -1,0 +1,15 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_color15_revisit1700.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-fcbo64-revisit1700"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-fcbo64-revisit1700"
+
+FrontViewScaleCover:
+  directional_ownership_enabled: true
+  directional_max_angle_deg: 45.0
+  frustum_conflict_budget_enabled: true
+  frustum_conflict_min_fraction: 0.05
+  frustum_conflict_min_rows: 16
+  frustum_conflict_budget_rows: 64

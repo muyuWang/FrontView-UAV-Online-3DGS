@@ -1,0 +1,13 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_tgbr75_sh3_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-spectral-baseline-200"
+
+Testset:
+  name: "PanoAir-tgbr-spectral-baseline-200"
+
+CudaMemoryProfile:
+  enabled: true
+
+Results:
+  skip_eval: true

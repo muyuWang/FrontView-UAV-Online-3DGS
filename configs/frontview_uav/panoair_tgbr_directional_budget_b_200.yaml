@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_directional_budget_a_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-directional-budget-b-200"
+
+Testset:
+  name: "PanoAir-tgbr-directional-budget-b-200"
+
+StreamingAppearanceLOD:
+  directional_step_budget_very_low_degrees: 0.75
+  directional_step_budget_low_degrees: 1.50

@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_spectral_baseline_full.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-residency-ebrr-control-full"
+
+Testset:
+  name: "PanoAir-tgbr-residency-ebrr-control-full"
+
+StreamingAppearanceLOD:
+  spectral_residency_enabled: false
+  spectral_replay_enabled: false
+  bounded_replay_residency_enabled: true

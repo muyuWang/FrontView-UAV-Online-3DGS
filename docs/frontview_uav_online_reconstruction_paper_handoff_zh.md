@@ -1,5 +1,7 @@
 # 面向前视无人机的范围感知在线 3D Gaussian 建图
 
+> **历史文档提示（2026-08-16）**：本文对应旧的固定深度 PBSD/FPR 阶段，已不代表当前最优实现。当前代码一致的方法说明见 `docs/frontview_uav_online_mapping_current_method_2026_08_16_zh.md`。尤其不要再把当前方案描述为固定 20/50 m 配额或固定 80 m FPR。
+
 > 代码审计分支：`research/hashless-frontview-lod-7-24`
 >
 > 代码审计提交：`0886bc906d1c0246b1fcb6d581a301c99bcd330e`

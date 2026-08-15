@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_r0p3_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-r0p3-full"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1_orbslam3_mono_vi_fused_full_v1"
+  end_cutoff: 0
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-r0p3-full"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_PanoAir/seq1_orbslam3_mono_vi_fused_full_v1"
+  end_cutoff: 0

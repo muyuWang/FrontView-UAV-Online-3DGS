@@ -1,0 +1,9 @@
+inherit_from: "configs/mydata/village1_best_tgbr75.yaml"
+
+Dataset:
+  name: "MyData-village4-FrontViewBest-TGBR75"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/mydata/village4"
+
+Testset:
+  name: "MyData-village4-FrontViewBest-TGBR75"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/mydata/village4"

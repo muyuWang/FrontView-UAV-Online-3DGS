@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_residual_cover_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-residual-cover-visibility0-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-residual-cover-visibility0-200"
+
+FrontViewResidualCover:
+  use_depth_visibility: true
+  behind_visibility_floor: 0.0

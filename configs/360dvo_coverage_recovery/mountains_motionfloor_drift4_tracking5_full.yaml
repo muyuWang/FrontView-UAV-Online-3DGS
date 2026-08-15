@@ -1,0 +1,10 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_coverage_recovery/mountains_motionfloor_tracking5_full.yaml
+
+Dataset:
+  name: 360DVO-CoverageRecoveryMotionD4Tracking5-mountains
+
+Testset:
+  name: 360DVO-CoverageRecoveryMotionD4Tracking5-mountains
+
+FrontViewCoverageRecovery:
+  depth_fallback_max_projected_drift_px: 4.0

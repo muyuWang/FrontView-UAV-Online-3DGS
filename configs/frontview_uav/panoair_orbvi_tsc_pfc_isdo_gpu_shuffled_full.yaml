@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_pfc_isdo_gpu_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-isdo-gpu-shuffled-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-isdo-gpu-shuffled-full"
+
+FrontViewScaleCover:
+  shuffle_sparse_track_identity: true

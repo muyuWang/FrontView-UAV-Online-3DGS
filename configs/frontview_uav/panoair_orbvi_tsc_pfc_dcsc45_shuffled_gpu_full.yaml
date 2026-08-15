@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_pfc_dcsc45_gpu_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-dcsc45-shuffled-gpu-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-dcsc45-shuffled-gpu-full"
+
+FrontViewScaleCover:
+  shuffle_directional_ownership: true

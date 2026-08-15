@@ -1,0 +1,18 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_compute_routed_warmup10_fp16_cap60_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-directional-step-percentile-200"
+
+Testset:
+  name: "PanoAir-tgbr-directional-step-percentile-200"
+
+StreamingAppearanceLOD:
+  directional_step_budget_enabled: true
+  directional_step_budget_selection_mode: "percentile"
+  directional_step_budget_warmup_keyframes: 8
+  directional_step_budget_very_low_steps: 6
+  directional_step_budget_low_steps: 8
+  directional_step_budget_percentile_window: 64
+  directional_step_budget_percentile_very_low_fraction: 0.30
+  directional_step_budget_percentile_low_fraction: 0.40
+  directional_step_budget_lr_compensation: true

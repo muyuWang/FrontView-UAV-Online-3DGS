@@ -1,8 +1,10 @@
 import argparse
 import copy
 import csv
+import functools
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -147,14 +149,23 @@ def ensure_even_frame(frame):
 
 
 class RenderMetricEvaluator:
-    def __init__(self, device, far_depth_threshold=50.0, opacity_threshold=0.05):
+    def __init__(
+        self,
+        device,
+        far_depth_threshold=50.0,
+        opacity_threshold=0.05,
+        compute_lpips=True,
+    ):
         self.device = torch.device(device)
         self.far_depth_threshold = float(far_depth_threshold)
         self.opacity_threshold = float(opacity_threshold)
-        self.lpips = LearnedPerceptualImagePatchSimilarity(
-            net_type="alex", normalize=True
-        ).to(self.device)
-        self.lpips.eval()
+        self.compute_lpips = bool(compute_lpips)
+        self.lpips = None
+        if self.compute_lpips:
+            self.lpips = LearnedPerceptualImagePatchSimilarity(
+                net_type="alex", normalize=True
+            ).to(self.device)
+            self.lpips.eval()
 
     def _to_rgb_tensor(self, image_bgr):
         image_rgb = np.ascontiguousarray(image_bgr[:, :, ::-1])
@@ -168,7 +179,7 @@ class RenderMetricEvaluator:
 
     @torch.inference_mode()
     def _masked_lpips(self, render, gt, mask):
-        if not torch.any(mask):
+        if self.lpips is None or not torch.any(mask):
             return None
         masked_render = torch.where(mask.expand_as(render), render, gt)
         value = self.lpips(masked_render, gt)
@@ -191,7 +202,14 @@ class RenderMetricEvaluator:
         return float(ssim_image[mask.expand_as(ssim_image)].mean().item())
 
     @torch.inference_mode()
-    def evaluate(self, render_bgr, gt_bgr, depth=None, opacity=None):
+    def evaluate(
+        self,
+        render_bgr,
+        gt_bgr,
+        depth=None,
+        opacity=None,
+        fixed_far_mask=None,
+    ):
         render = self._to_rgb_tensor(render_bgr)
         gt = self._to_rgb_tensor(gt_bgr)
 
@@ -211,13 +229,14 @@ class RenderMetricEvaluator:
             data_range=1.0,
             return_full_image=True,
         )
-        lpips = self.lpips(render, gt)
-        self.lpips.reset()
         metrics = {
             "psnr": float(psnr.item()),
             "ssim": float(ssim.item()),
-            "lpips": float(lpips.item()),
         }
+        if self.lpips is not None:
+            lpips = self.lpips(render, gt)
+            self.lpips.reset()
+            metrics["lpips"] = float(lpips.item())
         if depth is None:
             return metrics
 
@@ -249,23 +268,44 @@ class RenderMetricEvaluator:
             {
                 "near_psnr": self._masked_psnr(squared_error, near_mask),
                 "near_ssim": self._masked_ssim(ssim_image, near_mask),
-                "near_lpips": self._masked_lpips(render, gt, near_mask),
                 "far_psnr": self._masked_psnr(squared_error, far_mask),
                 "far_ssim": self._masked_ssim(ssim_image, far_mask),
-                "far_lpips": self._masked_lpips(render, gt, far_mask),
                 "far_edge_psnr": self._masked_psnr(
                     squared_error, far_edge_mask
                 ),
                 "far_edge_ssim": self._masked_ssim(ssim_image, far_edge_mask),
-                "far_edge_lpips": self._masked_lpips(
-                    render, gt, far_edge_mask
-                ),
                 "near_pixel_count": int(near_mask.sum().item()),
                 "far_pixel_count": int(far_mask.sum().item()),
                 "far_edge_pixel_count": int(far_edge_mask.sum().item()),
                 "far_pixel_fraction": float(far_mask.sum().item() / valid_count),
             }
         )
+        if fixed_far_mask is not None:
+            fixed_far = torch.as_tensor(
+                np.asarray(fixed_far_mask, dtype=np.bool_), device=self.device
+            ).view_as(depth)
+            fixed_far &= ~invalid_gt
+            metrics.update(
+                {
+                    "fixed_far_psnr": self._masked_psnr(squared_error, fixed_far),
+                    "fixed_far_ssim": self._masked_ssim(ssim_image, fixed_far),
+                    "fixed_far_pixel_count": int(fixed_far.sum().item()),
+                    "fixed_far_pixel_fraction": float(
+                        fixed_far.sum().item()
+                        / max(int((~invalid_gt).sum().item()), 1)
+                    ),
+                }
+            )
+        if self.lpips is not None:
+            metrics.update(
+                {
+                    "near_lpips": self._masked_lpips(render, gt, near_mask),
+                    "far_lpips": self._masked_lpips(render, gt, far_mask),
+                    "far_edge_lpips": self._masked_lpips(
+                        render, gt, far_edge_mask
+                    ),
+                }
+            )
         return metrics
 
 
@@ -306,6 +346,10 @@ def write_render_metrics(output_dir, rows):
                 "same far depth threshold as the primitive diagnostic. Region LPIPS "
                 "sets pixels outside the mask to GT in both inputs."
             ),
+            "fixed_far_region": (
+                "When present, fixed_far metrics use a baseline-generated binary "
+                "mask loaded by frame name; the evaluated method cannot change it."
+            ),
         },
         "frames": rows,
     }
@@ -314,22 +358,94 @@ def write_render_metrics(output_dir, rows):
         json.dump(payload, f, indent=2)
 
     mean = payload["mean"]
-    print(
-        "Mean render metrics: "
+    metric_text = (
         f"PSNR={mean['psnr']:.6f} dB, "
-        f"SSIM={mean['ssim']:.6f}, "
-        f"LPIPS={mean['lpips']:.6f}"
+        f"SSIM={mean['ssim']:.6f}"
     )
+    if "lpips" in mean:
+        metric_text += f", LPIPS={mean['lpips']:.6f}"
+    print("Mean render metrics: " + metric_text)
     print(f"  {metrics_path}")
     return metrics_path
 
 
+@functools.lru_cache(maxsize=1)
+def find_working_nvenc_ffmpeg():
+    """Return a system ffmpeg with a usable NVENC H.264 encoder."""
+
+    candidates = [
+        os.environ.get("FFMPEG_NVENC_EXE"),
+        "/usr/bin/ffmpeg",
+        shutil.which("ffmpeg"),
+    ]
+    checked = set()
+    for ffmpeg in candidates:
+        if not ffmpeg or ffmpeg in checked or not Path(ffmpeg).is_file():
+            continue
+        checked.add(ffmpeg)
+        encoders = subprocess.run(
+            [ffmpeg, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if encoders.returncode != 0 or "h264_nvenc" not in encoders.stdout:
+            continue
+        probe = subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=256x256:r=1:d=1",
+                "-frames:v",
+                "1",
+                "-c:v",
+                "h264_nvenc",
+                "-preset",
+                "fast",
+                "-f",
+                "null",
+                "-",
+            ],
+            capture_output=True,
+            check=False,
+        )
+        if probe.returncode == 0:
+            return ffmpeg
+    return None
+
+
+def resolve_h264_encoder(requested):
+    if requested not in ("auto", "cpu", "nvenc"):
+        raise ValueError("video encoder must be auto, cpu, or nvenc")
+    nvenc_ffmpeg = None if requested == "cpu" else find_working_nvenc_ffmpeg()
+    if requested == "nvenc" and nvenc_ffmpeg is None:
+        raise RuntimeError(
+            "NVENC was requested, but system ffmpeg could not initialize h264_nvenc"
+        )
+    if nvenc_ffmpeg is not None:
+        return nvenc_ffmpeg, "h264_nvenc"
+    return imageio_ffmpeg.get_ffmpeg_exe(), "libx264"
+
+
+def video_gpu_index(device):
+    device = str(device)
+    if not device.startswith("cuda") or ":" not in device:
+        return 0
+    return int(device.rsplit(":", 1)[1])
+
+
 class H264VideoWriter:
-    def __init__(self, path: Path, fps: float, size):
+    def __init__(self, path: Path, fps: float, size, encoder="auto", gpu_index=0):
         self.path = Path(path)
         self.width, self.height = size
         self.released = False
         self.proc = None
+        self.ffmpeg, self.encoder = resolve_h264_encoder(encoder)
 
         with tempfile.NamedTemporaryFile(
             prefix=f".{self.path.stem}_",
@@ -340,7 +456,7 @@ class H264VideoWriter:
             self.tmp_path = Path(tmp.name)
 
         command = [
-            imageio_ffmpeg.get_ffmpeg_exe(),
+            self.ffmpeg,
             "-y",
             "-hide_banner",
             "-loglevel",
@@ -359,20 +475,46 @@ class H264VideoWriter:
             "-i",
             "-",
             "-an",
-            "-vcodec",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-threads",
-            "2",
-            "-crf",
-            "23",
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-            str(self.tmp_path),
         ]
+        if self.encoder == "h264_nvenc":
+            command.extend(
+                [
+                    "-vcodec",
+                    "h264_nvenc",
+                    "-gpu",
+                    str(gpu_index),
+                    "-preset",
+                    "fast",
+                    "-rc",
+                    "vbr",
+                    "-cq",
+                    "23",
+                    "-b:v",
+                    "0",
+                ]
+            )
+        else:
+            command.extend(
+                [
+                    "-vcodec",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-threads",
+                    "2",
+                    "-crf",
+                    "23",
+                ]
+            )
+        command.extend(
+            [
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                str(self.tmp_path),
+            ]
+        )
         self.proc = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
@@ -381,6 +523,8 @@ class H264VideoWriter:
         )
         if self.proc.stdin is None:
             raise RuntimeError(f"Could not open ffmpeg stdin for video writer: {path}")
+        backend = "GPU" if self.encoder == "h264_nvenc" else "CPU"
+        print(f"H.264 writer: {self.path.name} -> {self.encoder} ({backend})")
 
     def write(self, frame):
         if self.released:
@@ -418,8 +562,14 @@ class H264VideoWriter:
         self.tmp_path.replace(self.path)
 
 
-def make_writer(path: Path, fps: float, size):
-    return H264VideoWriter(path, fps, size)
+def make_writer(path: Path, fps: float, size, encoder="auto", gpu_index=0):
+    return H264VideoWriter(
+        path,
+        fps,
+        size,
+        encoder=encoder,
+        gpu_index=gpu_index,
+    )
 
 
 def release_writers(writers):
@@ -432,6 +582,20 @@ def release_writers(writers):
                 first_error = exc
     if first_error is not None:
         raise first_error
+
+
+def combine_render_gt_depth(render_gt_frame, depth_frame):
+    """Compose equally high Render | GT | Depth panels without resizing."""
+
+    render_gt_frame = np.asarray(render_gt_frame)
+    depth_frame = np.asarray(depth_frame)
+    if render_gt_frame.ndim != 3 or depth_frame.ndim != 3:
+        raise ValueError("Combined video panels must be HxWxC images")
+    if render_gt_frame.shape[0] != depth_frame.shape[0]:
+        raise ValueError("Render/GT and depth panels must have equal heights")
+    if render_gt_frame.shape[2] != depth_frame.shape[2]:
+        raise ValueError("Render/GT and depth panels must have equal channels")
+    return ensure_even_frame(np.concatenate([render_gt_frame, depth_frame], axis=1))
 
 
 def draw_label(frame, label, x, y):
@@ -458,11 +622,25 @@ def draw_label(frame, label, x, y):
 
 
 class DepthColorizer:
-    def __init__(self, depth_min=None, depth_max=None):
+    COMPOSITING_MODES = ("transmittance_far", "conditional_hit")
+
+    def __init__(
+        self,
+        depth_min=None,
+        depth_max=None,
+        compositing_mode="transmittance_far",
+    ):
         if depth_min is not None and depth_max is not None and depth_max <= depth_min:
             raise ValueError("depth_max must be greater than depth_min.")
+        if compositing_mode not in self.COMPOSITING_MODES:
+            raise ValueError(
+                "depth compositing mode must be one of {}".format(
+                    ", ".join(self.COMPOSITING_MODES)
+                )
+            )
         self.depth_min = depth_min
         self.depth_max = depth_max
+        self.compositing_mode = compositing_mode
 
     def _ensure_bounds(self, values):
         values = np.asarray(values, dtype=np.float32)
@@ -492,16 +670,42 @@ class DepthColorizer:
             color_indices.reshape(-1, 1), cv2.COLORMAP_TURBO
         ).reshape(-1, 3)
 
-    def colorize(self, depth, opacity=None):
+    def depth_for_display(self, depth, opacity=None):
         depth = np.asarray(depth, dtype=np.float32).squeeze()
-        valid = np.isfinite(depth) & (depth > 0)
+        hit_valid = np.isfinite(depth) & (depth > 0)
         if opacity is not None:
-            valid &= np.asarray(opacity).squeeze() > 1e-4
+            opacity = np.asarray(opacity, dtype=np.float32).squeeze()
+            if opacity.shape != depth.shape:
+                raise ValueError("Depth and opacity must have the same shape.")
+            opacity_valid = np.isfinite(opacity)
+            bound_valid = hit_valid & opacity_valid & (opacity > 1e-4)
+        else:
+            opacity_valid = np.ones_like(hit_valid)
+            bound_valid = hit_valid
 
-        self._ensure_bounds(depth[valid])
+        self._ensure_bounds(depth[bound_valid])
+        if self.compositing_mode == "conditional_hit":
+            valid = bound_valid
+            return np.where(valid, depth, self.depth_min), valid
+
+        metric_mass = (
+            np.ones_like(depth, dtype=np.float32)
+            if opacity is None
+            else np.clip(np.where(opacity_valid, opacity, 0.0), 0.0, 1.0)
+        )
+        metric_mass = np.where(hit_valid, metric_mass, 0.0)
+        hit_depth = np.where(hit_valid, depth, self.depth_max)
+        display_depth = (
+            metric_mass * hit_depth + (1.0 - metric_mass) * self.depth_max
+        )
+        return display_depth, np.ones_like(hit_valid)
+
+    def colorize(self, depth, opacity=None):
+        display_depth, valid = self.depth_for_display(depth, opacity)
         scale = max(self.depth_max - self.depth_min, 1e-8)
-        safe_depth = np.where(valid, depth, self.depth_min)
-        normalized = np.clip((safe_depth - self.depth_min) / scale, 0.0, 1.0)
+        normalized = np.clip(
+            (display_depth - self.depth_min) / scale, 0.0, 1.0
+        )
         color_indices = np.rint((1.0 - normalized) * 255.0).astype(np.uint8)
         frame = cv2.applyColorMap(color_indices, cv2.COLORMAP_TURBO)
         frame[~valid] = (12, 12, 12)
@@ -518,6 +722,12 @@ class DepthColorizer:
             "depth_min": float(self.depth_min),
             "depth_max": float(self.depth_max),
             "colormap": "turbo_inverted",
+            "compositing_mode": self.compositing_mode,
+            "depth_definition": (
+                "expected_ray_termination_at_visualization_far_plane"
+                if self.compositing_mode == "transmittance_far"
+                else "conditional_expected_hit_depth"
+            ),
         }
 
 
@@ -839,10 +1049,12 @@ def build_render_gt_video(
     generate_primitives,
     depth_min,
     depth_max,
+    depth_compositing,
     primitive_scale,
     primitive_outline_scale,
     primitive_opacity_floor,
     far_gs_depth_threshold,
+    compute_lpips=True,
     use_view_detail=True,
     view_detail_path=None,
     view_detail_exclude_exact=None,
@@ -854,9 +1066,17 @@ def build_render_gt_video(
     frequency_cache_warp=False,
     use_background=True,
     use_cached_renders=True,
+    save_far_mask_dir=None,
+    fixed_far_mask_dir=None,
+    far_mask_quantile=0.80,
+    use_directional_layer=True,
+    directional_layer_overrides=None,
+    directional_layer_path=None,
+    video_encoder="auto",
 ):
     dataset_config = config["Testset"] if "Testset" in config else config["Dataset"]
     infos = load_camera_infos(dataset_config, render_begin, render_end)
+    source_index_offset = 0 if render_begin is None else int(render_begin)
     vignette = load_vignette(run_dir, dataset_config)
     render_dir = run_dir / "eval" / "renders"
 
@@ -872,14 +1092,27 @@ def build_render_gt_video(
     frequency_cache = None
     background_model = None
     primitive_renderer = None
-    depth_colorizer = DepthColorizer(depth_min, depth_max)
+    depth_colorizer = DepthColorizer(
+        depth_min,
+        depth_max,
+        compositing_mode=depth_compositing,
+    )
     far_gs_rows = []
     metric_rows = []
+    save_far_mask_dir = (
+        None if save_far_mask_dir is None else Path(save_far_mask_dir).resolve()
+    )
+    fixed_far_mask_dir = (
+        None if fixed_far_mask_dir is None else Path(fixed_far_mask_dir).resolve()
+    )
+    if save_far_mask_dir is not None:
+        save_far_mask_dir.mkdir(parents=True, exist_ok=True)
     metric_evaluator = (
         RenderMetricEvaluator(
             device,
             far_depth_threshold=far_gs_depth_threshold,
             opacity_threshold=primitive_opacity_floor,
+            compute_lpips=compute_lpips,
         )
         if generate_metrics
         else None
@@ -906,7 +1139,15 @@ def build_render_gt_video(
         nonlocal frequency_cache, background_model
         if gaussians is not None:
             return
-        gaussians = load_gaussians(run_dir, config, device, vignette)
+        gaussians = load_gaussians(
+            run_dir,
+            config,
+            device,
+            vignette,
+            load_directional_layer=use_directional_layer,
+            directional_layer_overrides=directional_layer_overrides,
+            directional_layer_path=directional_layer_path,
+        )
         if use_background:
             background_model = load_sky_background(
                 run_dir / BACKGROUND_MODEL_FILENAME
@@ -947,7 +1188,8 @@ def build_render_gt_video(
             )
 
     def get_modalities(idx):
-        render_path = render_dir / f"{idx:05d}.png"
+        source_idx = source_index_offset + int(idx)
+        render_path = render_dir / f"{source_idx:05d}.png"
         render_bgr = None
         if use_cached_renders and render_path.exists():
             render_bgr = cv2.imread(str(render_path), cv2.IMREAD_COLOR)
@@ -976,8 +1218,8 @@ def build_render_gt_video(
             pose,
             dataset_config,
             device,
-            f"traj_{idx:05d}",
-            idx,
+            f"traj_{source_idx:05d}",
+            source_idx,
             exposure_gain=tracked_camera.get("exposure_gain"),
             view_detail_store=view_detail_store,
             view_detail_exclude_exact=view_detail_exclude_exact,
@@ -998,22 +1240,69 @@ def build_render_gt_video(
         return modalities
 
     def frames_for_index(idx):
+        source_idx = source_index_offset + int(idx)
         modalities = get_modalities(idx)
         gt_bgr = read_gt_bgr(infos[idx], dataset_config, vignette)
         gt_bgr = cv2.resize(
             gt_bgr, (modalities["rgb"].shape[1], modalities["rgb"].shape[0])
         )
 
+        frame_name = infos[idx].get("image", f"frame_{idx:05d}")
+        mask_name = Path(frame_name).stem + ".npz"
+        fixed_far_mask = None
+        if fixed_far_mask_dir is not None:
+            mask_path = fixed_far_mask_dir / mask_name
+            if not mask_path.is_file():
+                raise FileNotFoundError(f"Missing fixed far mask: {mask_path}")
+            with np.load(mask_path) as payload:
+                shape = tuple(int(value) for value in payload["shape"])
+                fixed_far_mask = np.unpackbits(payload["packed"])[: np.prod(shape)]
+                fixed_far_mask = fixed_far_mask.reshape(shape).astype(np.bool_)
+
+        if save_far_mask_dir is not None:
+            depth = np.asarray(modalities["depth"], dtype=np.float32).squeeze()
+            opacity = np.asarray(modalities["opacity"], dtype=np.float32).squeeze()
+            valid = (
+                np.isfinite(depth)
+                & (depth > 0.0)
+                & np.isfinite(opacity)
+                & (opacity >= primitive_opacity_floor)
+            )
+            if not np.any(valid):
+                raise RuntimeError(f"No valid baseline depth for far mask: {frame_name}")
+            threshold = float(np.quantile(depth[valid], far_mask_quantile))
+            baseline_far = valid & (depth >= threshold)
+            np.savez_compressed(
+                save_far_mask_dir / mask_name,
+                packed=np.packbits(baseline_far.reshape(-1)),
+                shape=np.asarray(baseline_far.shape, dtype=np.int32),
+                depth_threshold_m=np.asarray(threshold, dtype=np.float32),
+                quantile=np.asarray(far_mask_quantile, dtype=np.float32),
+                frame_name=np.asarray(frame_name),
+            )
+
         if metric_evaluator is not None:
+            uncertainty_mass = modalities.get("uncertainty_mass")
+            uncertainty_stats = {}
+            if uncertainty_mass is not None:
+                uncertainty_mass = np.asarray(uncertainty_mass, dtype=np.float32)
+                uncertainty_stats = {
+                    "uncertainty_mass_mean": float(np.mean(uncertainty_mass)),
+                    "uncertainty_mass_nonzero_fraction": float(
+                        np.mean(uncertainty_mass > 0.0)
+                    ),
+                }
             metric_rows.append(
                 {
-                    "frame_index": int(idx),
-                    "frame_name": infos[idx].get("image", f"frame_{idx:05d}"),
+                    "frame_index": source_idx,
+                    "frame_name": frame_name,
+                    **uncertainty_stats,
                     **metric_evaluator.evaluate(
                         modalities["rgb"],
                         gt_bgr,
                         modalities.get("depth"),
                         modalities.get("opacity"),
+                        fixed_far_mask=fixed_far_mask,
                     ),
                 }
             )
@@ -1023,10 +1312,15 @@ def build_render_gt_video(
         draw_label(rgb_gt, "GT", modalities["rgb"].shape[1] + 20, 40)
         frames = {"rgb": ensure_even_frame(rgb_gt)}
         if generate_depth:
-            depth_frame = depth_colorizer.colorize(
-                modalities["depth"], modalities["opacity"]
+            depth_frame = ensure_even_frame(
+                depth_colorizer.colorize(
+                    modalities["depth"], modalities["opacity"]
+                )
             )
-            frames["depth"] = ensure_even_frame(depth_frame)
+            frames["depth"] = depth_frame
+            frames["rgb_depth"] = combine_render_gt_depth(
+                frames["rgb"], depth_frame
+            )
         if generate_opacity:
             opacity = np.asarray(modalities["opacity"], dtype=np.float32).squeeze()
             opacity_u8 = np.rint(np.clip(opacity, 0.0, 1.0) * 255.0).astype(np.uint8)
@@ -1056,6 +1350,7 @@ def build_render_gt_video(
     output_paths = {"rgb": output_dir / "render_vs_gt.mp4"}
     if generate_depth:
         output_paths["depth"] = output_dir / "render_depth.mp4"
+        output_paths["rgb_depth"] = output_dir / "render_vs_gt_depth.mp4"
     if generate_opacity:
         output_paths["opacity"] = output_dir / "render_opacity.mp4"
     if generate_primitives:
@@ -1063,7 +1358,13 @@ def build_render_gt_video(
 
     first_frames = frames_for_index(indices[0])
     writers = {
-        key: make_writer(output_paths[key], fps, (frame.shape[1], frame.shape[0]))
+        key: make_writer(
+            output_paths[key],
+            fps,
+            (frame.shape[1], frame.shape[0]),
+            encoder=video_encoder,
+            gpu_index=video_gpu_index(device),
+        )
         for key, frame in first_frames.items()
     }
     try:
@@ -1077,8 +1378,20 @@ def build_render_gt_video(
         release_writers(writers)
 
     metadata = {}
+    metadata["video_outputs"] = {
+        key: {
+            "path": str(output_paths[key]),
+            "encoder": writer.encoder,
+            "backend": "gpu" if writer.encoder == "h264_nvenc" else "cpu",
+        }
+        for key, writer in writers.items()
+    }
     if metric_rows:
         write_render_metrics(output_dir, metric_rows)
+    if gaussians is not None and use_directional_layer:
+        metadata["frontview_directional_layer"] = (
+            gaussians.frontview_directional_layer_summary()
+        )
     if generate_depth:
         metadata["depth"] = depth_colorizer.metadata()
     if generate_primitives:
@@ -1105,11 +1418,24 @@ def prepare_render_config(config, device):
         render_config["Loss"]["device"] = device
     if "CameraOptimizer" in render_config["Mapper"]:
         render_config["Mapper"]["CameraOptimizer"]["device"] = device
+    # Dense PLY omits TGBR degrees; sparse TGBR PLY restores them on load.
+    # Full-degree inference is exact in both cases because inactive bands are zero.
+    streaming_lod = render_config.get("StreamingAppearanceLOD")
+    if streaming_lod is not None:
+        streaming_lod["compute_routing"] = False
     render_config["Model"].pop("DepthCovEstimator", None)
     return render_config
 
 
-def load_gaussians(run_dir, config, device, vignette):
+def load_gaussians(
+    run_dir,
+    config,
+    device,
+    vignette,
+    load_directional_layer=True,
+    directional_layer_overrides=None,
+    directional_layer_path=None,
+):
     ply_path = select_gaussian_ply(run_dir, config)
     if not ply_path.exists():
         raise FileNotFoundError(f"Missing Gaussian PLY: {ply_path}")
@@ -1117,9 +1443,15 @@ def load_gaussians(run_dir, config, device, vignette):
     print(f"Loading Gaussian PLY: {ply_path}")
     gaussians = GaussianModel(prepare_render_config(config, device))
     gaussians.load_from_ply(str(ply_path))
-    directional_layer_path = run_dir / DIRECTIONAL_LAYER_FILENAME
-    if directional_layer_path.exists():
-        gaussians.load_frontview_directional_layer(directional_layer_path)
+    directional_layer_path = (
+        run_dir / DIRECTIONAL_LAYER_FILENAME
+        if directional_layer_path is None
+        else Path(directional_layer_path)
+    )
+    if load_directional_layer and directional_layer_path.exists():
+        gaussians.load_frontview_directional_layer(
+            directional_layer_path, config_overrides=directional_layer_overrides
+        )
     gaussians.set_vignette_img(vignette)
     return gaussians
 
@@ -1328,8 +1660,34 @@ def render_pose_modalities(
     rgb_bgr = cv2.cvtColor((rgb * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
     return {
         "rgb": rgb_bgr,
-        "depth": render_pkg["depth"].detach().cpu().numpy(),
-        "opacity": render_pkg["opacity"].detach().cpu().numpy(),
+        "depth": (
+            render_pkg["metric_depth"]
+            if gaussians.causal_dual_responsibility_config["enabled"]
+            and gaussians.causal_dual_responsibility_config[
+                "export_metric_depth"
+            ]
+            and "metric_depth" in render_pkg
+            else render_pkg["depth"]
+        )
+        .detach()
+        .cpu()
+        .numpy(),
+        "opacity": (
+            render_pkg.get("metric_opacity", render_pkg["opacity"])
+            if gaussians.causal_dual_responsibility_config["enabled"]
+            and gaussians.causal_dual_responsibility_config[
+                "export_metric_depth"
+            ]
+            else render_pkg["opacity"]
+        )
+        .detach()
+        .cpu()
+        .numpy(),
+        "uncertainty_mass": (
+            render_pkg["uncertainty_mass"].detach().cpu().numpy()
+            if "uncertainty_mass" in render_pkg
+            else None
+        ),
         "camera": cam,
     }
 
@@ -1357,6 +1715,7 @@ def build_novel_orbit_video(
     generate_primitives,
     depth_min,
     depth_max,
+    depth_compositing,
     primitive_scale,
     primitive_outline_scale,
     primitive_opacity_floor,
@@ -1365,11 +1724,23 @@ def build_novel_orbit_video(
     view_detail_path=None,
     view_detail_sources=1,
     use_background=True,
+    use_directional_layer=True,
+    directional_layer_overrides=None,
+    directional_layer_path=None,
+    video_encoder="auto",
 ):
     dataset_config = config["Testset"] if "Testset" in config else config["Dataset"]
     infos = load_camera_infos(dataset_config, render_begin, render_end)
     vignette = load_vignette(run_dir, dataset_config)
-    gaussians = load_gaussians(run_dir, config, device, vignette)
+    gaussians = load_gaussians(
+        run_dir,
+        config,
+        device,
+        vignette,
+        load_directional_layer=use_directional_layer,
+        directional_layer_overrides=directional_layer_overrides,
+        directional_layer_path=directional_layer_path,
+    )
     background_model = (
         load_sky_background(run_dir / BACKGROUND_MODEL_FILENAME)
         if use_background
@@ -1387,7 +1758,11 @@ def build_novel_orbit_video(
         if use_view_detail and resolved_view_detail_path.exists()
         else None
     )
-    depth_colorizer = DepthColorizer(depth_min, depth_max)
+    depth_colorizer = DepthColorizer(
+        depth_min,
+        depth_max,
+        compositing_mode=depth_compositing,
+    )
     far_gs_rows = []
     primitive_renderer = None
     if generate_primitives:
@@ -1457,7 +1832,13 @@ def build_novel_orbit_video(
 
     first_frames = frames_for_pose(poses[0], 0)
     writers = {
-        key: make_writer(output_paths[key], fps, (frame.shape[1], frame.shape[0]))
+        key: make_writer(
+            output_paths[key],
+            fps,
+            (frame.shape[1], frame.shape[0]),
+            encoder=video_encoder,
+            gpu_index=video_gpu_index(device),
+        )
         for key, frame in first_frames.items()
     }
     try:
@@ -1519,6 +1900,11 @@ def parse_args():
         help="Do not calculate PSNR, SSIM, and LPIPS for the render/GT video.",
     )
     parser.add_argument(
+        "--skip_lpips",
+        action="store_true",
+        help="Calculate PSNR and SSIM without initializing or running LPIPS.",
+    )
+    parser.add_argument(
         "--skip_depth",
         action="store_true",
         help="Do not generate colorized expected-depth videos.",
@@ -1545,6 +1931,15 @@ def parse_args():
         default=None,
         help="Fixed far bound for depth colors. Defaults to the first frame's 98th percentile.",
     )
+    parser.add_argument(
+        "--depth_compositing",
+        choices=DepthColorizer.COMPOSITING_MODES,
+        default="transmittance_far",
+        help=(
+            "Depth-video ray termination definition. transmittance_far assigns "
+            "unexplained ray mass to the visualization far bound."
+        ),
+    )
     parser.add_argument("--primitive_scale", type=float, default=1.0)
     parser.add_argument("--primitive_outline_scale", type=float, default=1.25)
     parser.add_argument("--primitive_opacity_floor", type=float, default=0.15)
@@ -1553,6 +1948,24 @@ def parse_args():
         type=float,
         default=50.0,
         help="Camera-space depth threshold used to count very distant visible Gaussians.",
+    )
+    parser.add_argument(
+        "--save_far_mask_dir",
+        type=Path,
+        default=None,
+        help="Save packed baseline far masks keyed by frame name.",
+    )
+    parser.add_argument(
+        "--fixed_far_mask_dir",
+        type=Path,
+        default=None,
+        help="Evaluate fixed_far metrics using masks saved by a baseline run.",
+    )
+    parser.add_argument(
+        "--far_mask_quantile",
+        type=float,
+        default=0.80,
+        help="Per-frame baseline depth quantile used only to define saved masks.",
     )
     parser.add_argument(
         "--skip_render_gt",
@@ -1591,6 +2004,92 @@ def parse_args():
         "--skip_background",
         action="store_true",
         help="Ignore a learned far-field background sidecar even if one exists.",
+    )
+    parser.add_argument(
+        "--video_encoder",
+        choices=("auto", "cpu", "nvenc"),
+        default="auto",
+        help=(
+            "H.264 backend. auto uses GPU NVENC when a working system ffmpeg "
+            "is available and otherwise falls back to CPU libx264."
+        ),
+    )
+    parser.add_argument(
+        "--skip_directional_layer",
+        action="store_true",
+        help="Render the Gaussian checkpoint without its directional-layer sidecar.",
+    )
+    parser.add_argument(
+        "--directional_warp_mode",
+        choices=("rotation", "adaptive_se3", "se3_fallback"),
+        default=None,
+        help="Optional checkpoint-only directional warp override.",
+    )
+    parser.add_argument(
+        "--directional_source_fusion",
+        choices=("first", "mean", "causal_crossfade"),
+        default=None,
+        help="Optional checkpoint-only directional source fusion override.",
+    )
+    parser.add_argument(
+        "--directional_boundary_taper",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Taper directional ownership where warp disagreement exceeds border support.",
+    )
+    parser.add_argument(
+        "--directional_warp_depth_control",
+        choices=("aligned", "spatial_roll"),
+        default=None,
+        help="Preserve or spatially misalign SE(3) depth for a matched control.",
+    )
+    parser.add_argument(
+        "--directional_pose_score_mode",
+        choices=("fixed_depth", "rendered_inverse_depth"),
+        default=None,
+        help="Use fixed-depth or online rendered-depth anchor scoring.",
+    )
+    parser.add_argument(
+        "--directional_geometry_gate_mode",
+        choices=(
+            "none",
+            "opacity",
+            "depth_or_opacity",
+            "metric_transmittance",
+            "uncertainty_mass",
+        ),
+        default=None,
+        help="Checkpoint-only directional ownership gate override.",
+    )
+    parser.add_argument(
+        "--directional_uncertainty_cell_px",
+        type=float,
+        default=None,
+        help="Checkpoint-only projected uncertainty ownership cell size.",
+    )
+    parser.add_argument(
+        "--directional_low_opacity_threshold",
+        type=float,
+        default=None,
+        help="Checkpoint-only opacity ownership threshold override.",
+    )
+    parser.add_argument(
+        "--directional_blend_weight",
+        type=float,
+        default=None,
+        help="Checkpoint-only directional blend weight override.",
+    )
+    parser.add_argument(
+        "--directional_consistency_threshold",
+        type=float,
+        default=None,
+        help="Checkpoint-only two-anchor consistency threshold override.",
+    )
+    parser.add_argument(
+        "--directional_layer_path",
+        type=Path,
+        default=None,
+        help="Optional directional sidecar path; defaults to RUN_DIR sidecar.",
     )
     parser.add_argument(
         "--ignore_cached_renders",
@@ -1639,6 +2138,8 @@ def main():
         raise ValueError("primitive_opacity_floor must be between zero and one.")
     if args.far_gs_depth_threshold <= 0:
         raise ValueError("far_gs_depth_threshold must be greater than zero.")
+    if not 0.0 < args.far_mask_quantile < 1.0:
+        raise ValueError("far_mask_quantile must be in (0, 1).")
     if args.view_detail_sources <= 0:
         raise ValueError("view_detail_sources must be greater than zero.")
 
@@ -1648,6 +2149,22 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     config = load_run_config(run_dir)
+    directional_layer_overrides = {
+        key: value
+        for key, value in (
+            ("warp_mode", args.directional_warp_mode),
+            ("source_fusion", args.directional_source_fusion),
+            ("boundary_taper", args.directional_boundary_taper),
+            ("warp_depth_control", args.directional_warp_depth_control),
+            ("pose_score_mode", args.directional_pose_score_mode),
+            ("geometry_gate_mode", args.directional_geometry_gate_mode),
+            ("uncertainty_cell_px", args.directional_uncertainty_cell_px),
+            ("low_opacity_threshold", args.directional_low_opacity_threshold),
+            ("blend_weight", args.directional_blend_weight),
+            ("consistency_threshold", args.directional_consistency_threshold),
+        )
+        if value is not None
+    }
     generated = []
 
     if not args.skip_render_gt:
@@ -1668,10 +2185,12 @@ def main():
                 generate_primitives=not args.skip_primitives,
                 depth_min=args.depth_min,
                 depth_max=args.depth_max,
+                depth_compositing=args.depth_compositing,
                 primitive_scale=args.primitive_scale,
                 primitive_outline_scale=args.primitive_outline_scale,
                 primitive_opacity_floor=args.primitive_opacity_floor,
                 far_gs_depth_threshold=args.far_gs_depth_threshold,
+                compute_lpips=not args.skip_lpips,
                 use_view_detail=not args.skip_view_detail,
                 view_detail_path=args.view_detail_path,
                 view_detail_exclude_exact=args.view_detail_exclude_exact,
@@ -1683,6 +2202,13 @@ def main():
                 frequency_cache_warp=args.frequency_cache_warp,
                 use_background=not args.skip_background,
                 use_cached_renders=not args.ignore_cached_renders,
+                save_far_mask_dir=args.save_far_mask_dir,
+                fixed_far_mask_dir=args.fixed_far_mask_dir,
+                far_mask_quantile=args.far_mask_quantile,
+                use_directional_layer=not args.skip_directional_layer,
+                directional_layer_overrides=directional_layer_overrides,
+                directional_layer_path=args.directional_layer_path,
+                video_encoder=args.video_encoder,
             )
         )
 
@@ -1705,6 +2231,7 @@ def main():
                 generate_primitives=not args.skip_primitives,
                 depth_min=args.depth_min,
                 depth_max=args.depth_max,
+                depth_compositing=args.depth_compositing,
                 primitive_scale=args.primitive_scale,
                 primitive_outline_scale=args.primitive_outline_scale,
                 primitive_opacity_floor=args.primitive_opacity_floor,
@@ -1713,6 +2240,10 @@ def main():
                 view_detail_path=args.view_detail_path,
                 view_detail_sources=args.view_detail_sources,
                 use_background=not args.skip_background,
+                use_directional_layer=not args.skip_directional_layer,
+                directional_layer_overrides=directional_layer_overrides,
+                directional_layer_path=args.directional_layer_path,
+                video_encoder=args.video_encoder,
             )
         )
 

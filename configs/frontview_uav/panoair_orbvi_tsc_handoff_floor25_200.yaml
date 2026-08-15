@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_handoff_floor75_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-handoff-floor25-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-handoff-floor25-200"
+
+FrontViewScaleCover:
+  handoff_parent_floor: 0.25

@@ -1,0 +1,16 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_residual_cover_wide_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-covlod-strict-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-covlod-strict-200"
+
+FrontViewResidualCover:
+  use_covariance_lod: true
+  covariance_neighbors: 8
+  covariance_overlap_sigma: 3.0
+  covariance_refinement_ratio: 2.0
+  covariance_duplicate_floor: 0.0
+  covariance_opacity_min: 0.01
+  shuffle_covariance: false

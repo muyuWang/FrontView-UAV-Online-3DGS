@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_rift_handoff_floor0_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-rift-handoff-floor50-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-rift-handoff-floor50-200"
+
+FrontViewIdentityLOD:
+  handoff_parent_floor: 0.50

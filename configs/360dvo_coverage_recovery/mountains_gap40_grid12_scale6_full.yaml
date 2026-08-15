@@ -1,0 +1,11 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_coverage_recovery/mountains_gap40_full.yaml
+
+Dataset:
+  name: 360DVO-CoverageRecoveryGap40Grid12Scale6-mountains
+
+Testset:
+  name: 360DVO-CoverageRecoveryGap40Grid12Scale6-mountains
+
+FrontViewCoverageRecovery:
+  depth_fallback_cell_px: 12
+  depth_fallback_scale_multiplier: 6.0

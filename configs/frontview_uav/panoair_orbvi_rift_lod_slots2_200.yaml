@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_rift_lod_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-rift-lod-slots2-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-rift-lod-slots2-200"
+
+FrontViewIdentityLOD:
+  children_per_sector: 2

@@ -1,0 +1,18 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_rift_lod_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-rift-footprint-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-rift-footprint-200"
+
+FrontViewIdentityLOD:
+  slot_mode: "footprint"
+  max_image_gate_px: 8.0
+  radius_gate_scale: 0.60
+  depth_ratio: 1.06
+  min_lod_radius_px: 4.0
+  min_lod_residual: 0.05
+  lod_cell_px: 3.0
+  lod_capacity_radius_px: 3.0
+  max_children_per_node: 16

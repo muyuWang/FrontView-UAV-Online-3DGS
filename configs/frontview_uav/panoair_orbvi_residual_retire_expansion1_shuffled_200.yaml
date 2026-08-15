@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_residual_retire_expansion1_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-residual-retire-expansion1-shuffled-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-residual-retire-expansion1-shuffled-200"
+
+FrontViewResidualCover:
+  shuffle_retirement: true

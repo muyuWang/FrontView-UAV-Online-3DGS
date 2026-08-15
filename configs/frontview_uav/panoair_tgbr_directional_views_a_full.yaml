@@ -1,0 +1,18 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_compute_routed_cap60_full.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-directional-views-a-full"
+
+Testset:
+  name: "PanoAir-tgbr-directional-views-a-full"
+
+StreamingAppearanceLOD:
+  directional_view_budget_enabled: true
+  directional_view_budget_warmup_keyframes: 8
+  directional_view_budget_very_low_degrees: 0.50
+  directional_view_budget_low_degrees: 1.25
+  directional_view_budget_very_low_compact_steps: 4
+  directional_view_budget_low_compact_steps: 2
+  directional_view_budget_compact_views: 2
+  directional_view_budget_full_anchor_steps: 1
+  directional_view_budget_full_tail_steps: 2

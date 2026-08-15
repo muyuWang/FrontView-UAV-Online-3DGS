@@ -1,0 +1,10 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_coverage_recovery/mountains_full.yaml
+
+Dataset:
+  name: 360DVO-CoverageRecoveryGap60-mountains
+
+Testset:
+  name: 360DVO-CoverageRecoveryGap60-mountains
+
+FrontViewCoverageRecovery:
+  min_frame_gap: 60

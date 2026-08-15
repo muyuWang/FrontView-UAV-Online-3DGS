@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_r0p3_color15_sh3_full.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-compute-static-sh3-full"
+
+Testset:
+  name: "PanoAir-tgbr-compute-static-sh3-full"
+
+Results:
+  skip_eval: true

@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_compute_routed_warmup10_fp16_cap60_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-bounded-residency-200"
+
+Testset:
+  name: "PanoAir-tgbr-bounded-residency-200"
+
+StreamingAppearanceLOD:
+  bounded_replay_residency_enabled: true

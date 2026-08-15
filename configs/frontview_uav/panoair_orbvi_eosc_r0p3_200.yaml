@@ -1,0 +1,13 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_r0p3_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-eosc-r0p3-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-eosc-r0p3-200"
+
+FrontViewScaleCover:
+  source_priority_enabled: true
+  shuffle_source_priority: false
+  active_occupancy_enabled: false
+  dynamic_handoff_enabled: false

@@ -33,12 +33,26 @@ class GaussianProposalBatch:
     view_scale_size: float
     cover_sizes: Optional[np.ndarray] = None
     view_directions: Optional[np.ndarray] = None
+    responsibility_depths: Optional[np.ndarray] = None
+    responsibility_world_points: Optional[np.ndarray] = None
+    responsibility_log_scales: Optional[np.ndarray] = None
+    responsibility_cover_sizes: Optional[np.ndarray] = None
+    responsibility_view_directions: Optional[np.ndarray] = None
+    radial_scale_factors: Optional[np.ndarray] = None
+    covariance_scale_factors: Optional[np.ndarray] = None
+    scale_expansion_limits: Optional[np.ndarray] = None
+    footprint_target_scales: Optional[np.ndarray] = None
+    initial_max_parallax_sin2: Optional[np.ndarray] = None
+    initial_quaternions: Optional[np.ndarray] = None
+    depth_fallback: Optional[np.ndarray] = None
     stable_depths: Optional[np.ndarray] = None
     depth_confidences: Optional[np.ndarray] = None
+    metric_certificates: Optional[np.ndarray] = None
     multiview_support_scores: Optional[np.ndarray] = None
     frequency_scores: Optional[np.ndarray] = None
     track_ids: Optional[np.ndarray] = None
     source_kinds: Optional[np.ndarray] = None
+    budget_primary: Optional[np.ndarray] = None
     responsibility_parent_uids: Optional[np.ndarray] = None
     responsibility_levels: Optional[np.ndarray] = None
     responsibility_sectors: Optional[np.ndarray] = None
@@ -85,6 +99,19 @@ class GaussianProposalBatch:
                 raise ValueError("Proposal multiview support score has the wrong shape")
             if np.any(~np.isfinite(self.multiview_support_scores)):
                 raise ValueError("Proposal multiview support scores must be finite")
+        if self.metric_certificates is None:
+            self.metric_certificates = np.ones((count,), dtype=np.float32)
+        else:
+            self.metric_certificates = np.asarray(
+                self.metric_certificates, dtype=np.float32
+            ).reshape(-1)
+            if self.metric_certificates.shape != (count,):
+                raise ValueError("Proposal metric certificates have the wrong shape")
+            if np.any(~np.isfinite(self.metric_certificates)) or np.any(
+                (self.metric_certificates < 0.0)
+                | (self.metric_certificates > 1.0)
+            ):
+                raise ValueError("Proposal metric certificates must lie in [0, 1]")
         if self.cover_sizes is None:
             self.cover_sizes = np.full(
                 (count,), float(self.view_scale_size), dtype=np.float32
@@ -107,6 +134,168 @@ class GaussianProposalBatch:
                 raise ValueError("Proposal view directions have the wrong shape")
             if np.any(~np.isfinite(self.view_directions)):
                 raise ValueError("Proposal view directions must be finite")
+        if self.responsibility_depths is None:
+            self.responsibility_depths = np.asarray(self.depths).copy()
+        else:
+            self.responsibility_depths = np.asarray(
+                self.responsibility_depths, dtype=np.float32
+            ).reshape(-1)
+            if self.responsibility_depths.shape != (count,):
+                raise ValueError("Proposal responsibility depths have the wrong shape")
+            if np.any(~np.isfinite(self.responsibility_depths)) or np.any(
+                self.responsibility_depths <= 0.0
+            ):
+                raise ValueError(
+                    "Proposal responsibility depths must be finite and positive"
+                )
+        if self.responsibility_world_points is None:
+            self.responsibility_world_points = np.asarray(self.world_points).copy()
+        else:
+            self.responsibility_world_points = np.asarray(
+                self.responsibility_world_points, dtype=np.float32
+            )
+            if self.responsibility_world_points.shape != (count, 3):
+                raise ValueError(
+                    "Proposal responsibility world points must have shape [N, 3]"
+                )
+            if np.any(~np.isfinite(self.responsibility_world_points)):
+                raise ValueError("Proposal responsibility world points must be finite")
+        if self.responsibility_log_scales is None:
+            self.responsibility_log_scales = np.asarray(self.log_scales).copy()
+        else:
+            self.responsibility_log_scales = np.asarray(
+                self.responsibility_log_scales, dtype=np.float32
+            )
+            if self.responsibility_log_scales.shape != self.log_scales.shape:
+                raise ValueError(
+                    "Proposal responsibility log scales must match Gaussian scales"
+                )
+            if np.any(~np.isfinite(self.responsibility_log_scales)):
+                raise ValueError("Proposal responsibility log scales must be finite")
+        if self.responsibility_cover_sizes is None:
+            self.responsibility_cover_sizes = self.cover_sizes.copy()
+        else:
+            self.responsibility_cover_sizes = np.asarray(
+                self.responsibility_cover_sizes, dtype=np.float32
+            ).reshape(-1)
+            if self.responsibility_cover_sizes.shape != (count,):
+                raise ValueError(
+                    "Proposal responsibility cover sizes have the wrong shape"
+                )
+            if np.any(~np.isfinite(self.responsibility_cover_sizes)) or np.any(
+                self.responsibility_cover_sizes <= 0.0
+            ):
+                raise ValueError(
+                    "Proposal responsibility cover sizes must be finite and positive"
+                )
+        if self.responsibility_view_directions is None:
+            self.responsibility_view_directions = self.view_directions.copy()
+        else:
+            self.responsibility_view_directions = np.asarray(
+                self.responsibility_view_directions, dtype=np.float32
+            )
+            if self.responsibility_view_directions.shape != (count, 3):
+                raise ValueError(
+                    "Proposal responsibility view directions must have shape [N, 3]"
+                )
+            if np.any(~np.isfinite(self.responsibility_view_directions)):
+                raise ValueError(
+                    "Proposal responsibility view directions must be finite"
+                )
+        if self.radial_scale_factors is None:
+            self.radial_scale_factors = np.ones((count,), dtype=np.float32)
+        else:
+            self.radial_scale_factors = np.asarray(
+                self.radial_scale_factors, dtype=np.float32
+            ).reshape(-1)
+            if self.radial_scale_factors.shape != (count,):
+                raise ValueError("Proposal radial scale factors have the wrong shape")
+            if np.any(~np.isfinite(self.radial_scale_factors)) or np.any(
+                self.radial_scale_factors <= 0.0
+            ):
+                raise ValueError("Proposal radial scale factors must be positive")
+        if self.covariance_scale_factors is None:
+            self.covariance_scale_factors = np.ones(
+                (count, 3), dtype=np.float32
+            )
+        else:
+            self.covariance_scale_factors = np.asarray(
+                self.covariance_scale_factors, dtype=np.float32
+            )
+            if self.covariance_scale_factors.shape != (count, 3):
+                raise ValueError("Proposal covariance factors must have shape [N, 3]")
+            if np.any(~np.isfinite(self.covariance_scale_factors)) or np.any(
+                self.covariance_scale_factors <= 0.0
+            ):
+                raise ValueError("Proposal covariance factors must be positive")
+        if self.initial_quaternions is None:
+            self.initial_quaternions = np.zeros((count, 4), dtype=np.float32)
+            self.initial_quaternions[:, 0] = 1.0
+        else:
+            self.initial_quaternions = np.asarray(
+                self.initial_quaternions, dtype=np.float32
+            )
+            if self.initial_quaternions.shape != (count, 4):
+                raise ValueError("Proposal quaternions must have shape [N, 4]")
+            norms = np.linalg.norm(self.initial_quaternions, axis=1)
+            if np.any(~np.isfinite(self.initial_quaternions)) or np.any(
+                norms <= 1.0e-8
+            ):
+                raise ValueError("Proposal quaternions must be finite and nonzero")
+            self.initial_quaternions = (
+                self.initial_quaternions / norms[:, None]
+            ).astype(np.float32, copy=False)
+        if self.scale_expansion_limits is None:
+            self.scale_expansion_limits = np.full(
+                (count,), np.inf, dtype=np.float32
+            )
+        else:
+            self.scale_expansion_limits = np.asarray(
+                self.scale_expansion_limits, dtype=np.float32
+            ).reshape(-1)
+            if self.scale_expansion_limits.shape != (count,):
+                raise ValueError("Proposal scale limits have the wrong shape")
+            if np.any(np.isnan(self.scale_expansion_limits)) or np.any(
+                self.scale_expansion_limits < 1.0
+            ):
+                raise ValueError("Proposal scale limits must be at least one")
+        if self.footprint_target_scales is None:
+            self.footprint_target_scales = np.full(
+                (count,), np.inf, dtype=np.float32
+            )
+        else:
+            self.footprint_target_scales = np.asarray(
+                self.footprint_target_scales, dtype=np.float32
+            ).reshape(-1)
+            if self.footprint_target_scales.shape != (count,):
+                raise ValueError("Proposal footprint targets have the wrong shape")
+            if np.any(np.isnan(self.footprint_target_scales)) or np.any(
+                self.footprint_target_scales <= 0.0
+            ):
+                raise ValueError("Proposal footprint targets must be positive")
+        if self.initial_max_parallax_sin2 is None:
+            self.initial_max_parallax_sin2 = np.zeros(
+                (count,), dtype=np.float32
+            )
+        else:
+            self.initial_max_parallax_sin2 = np.asarray(
+                self.initial_max_parallax_sin2, dtype=np.float32
+            ).reshape(-1)
+            if self.initial_max_parallax_sin2.shape != (count,):
+                raise ValueError("Proposal parallax state has the wrong shape")
+            if np.any(~np.isfinite(self.initial_max_parallax_sin2)) or np.any(
+                (self.initial_max_parallax_sin2 < 0.0)
+                | (self.initial_max_parallax_sin2 > 1.0)
+            ):
+                raise ValueError("Proposal parallax state must lie in [0, 1]")
+        if self.depth_fallback is None:
+            self.depth_fallback = np.zeros((count,), dtype=np.bool_)
+        else:
+            self.depth_fallback = np.asarray(
+                self.depth_fallback, dtype=np.bool_
+            ).reshape(-1)
+            if self.depth_fallback.shape != (count,):
+                raise ValueError("Proposal fallback mask has the wrong shape")
         if self.stable_depths is None:
             self.stable_depths = np.full((count,), np.nan, dtype=np.float32)
         else:
@@ -133,6 +322,14 @@ class GaussianProposalBatch:
             self.source_kinds = np.asarray(self.source_kinds, dtype="U32")
             if self.source_kinds.shape != (count,):
                 raise ValueError("Proposal source kinds have the wrong shape")
+        if self.budget_primary is None:
+            self.budget_primary = np.ones((count,), dtype=np.bool_)
+        else:
+            self.budget_primary = np.asarray(
+                self.budget_primary, dtype=np.bool_
+            ).reshape(-1)
+            if self.budget_primary.shape != (count,):
+                raise ValueError("Proposal budget-primary mask has the wrong shape")
         if self.responsibility_parent_uids is None:
             self.responsibility_parent_uids = np.full((count,), -1, dtype=np.int64)
         else:
@@ -187,12 +384,38 @@ class GaussianProposalBatch:
             sparse_depth_valid=self.sparse_depth_valid[selection].copy(),
             cover_sizes=self.cover_sizes[selection].copy(),
             view_directions=self.view_directions[selection].copy(),
+            responsibility_depths=self.responsibility_depths[selection].copy(),
+            responsibility_world_points=self.responsibility_world_points[
+                selection
+            ].copy(),
+            responsibility_log_scales=self.responsibility_log_scales[
+                selection
+            ].copy(),
+            responsibility_cover_sizes=self.responsibility_cover_sizes[
+                selection
+            ].copy(),
+            responsibility_view_directions=self.responsibility_view_directions[
+                selection
+            ].copy(),
+            radial_scale_factors=self.radial_scale_factors[selection].copy(),
+            covariance_scale_factors=self.covariance_scale_factors[
+                selection
+            ].copy(),
+            scale_expansion_limits=self.scale_expansion_limits[selection].copy(),
+            footprint_target_scales=self.footprint_target_scales[selection].copy(),
+            initial_max_parallax_sin2=self.initial_max_parallax_sin2[
+                selection
+            ].copy(),
+            initial_quaternions=self.initial_quaternions[selection].copy(),
+            depth_fallback=self.depth_fallback[selection].copy(),
             stable_depths=self.stable_depths[selection].copy(),
             depth_confidences=self.depth_confidences[selection].copy(),
+            metric_certificates=self.metric_certificates[selection].copy(),
             multiview_support_scores=self.multiview_support_scores[selection].copy(),
             frequency_scores=self.frequency_scores[selection].copy(),
             track_ids=self.track_ids[selection].copy(),
             source_kinds=self.source_kinds[selection].copy(),
+            budget_primary=self.budget_primary[selection].copy(),
             responsibility_parent_uids=self.responsibility_parent_uids[selection].copy(),
             responsibility_levels=self.responsibility_levels[selection].copy(),
             responsibility_sectors=self.responsibility_sectors[selection].copy(),
@@ -224,12 +447,26 @@ class GaussianProposalBatch:
             "sparse_depth_valid",
             "cover_sizes",
             "view_directions",
+            "responsibility_depths",
+            "responsibility_world_points",
+            "responsibility_log_scales",
+            "responsibility_cover_sizes",
+            "responsibility_view_directions",
+            "radial_scale_factors",
+            "covariance_scale_factors",
+            "scale_expansion_limits",
+            "footprint_target_scales",
+            "initial_max_parallax_sin2",
+            "initial_quaternions",
+            "depth_fallback",
             "stable_depths",
             "depth_confidences",
+            "metric_certificates",
             "multiview_support_scores",
             "frequency_scores",
             "track_ids",
             "source_kinds",
+            "budget_primary",
             "responsibility_parent_uids",
             "responsibility_levels",
             "responsibility_sectors",

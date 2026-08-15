@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_r0p3_color15_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-active-color15-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-active-color15-200"
+
+FrontViewScaleCover:
+  active_occupancy_enabled: true
+  dynamic_handoff_enabled: false

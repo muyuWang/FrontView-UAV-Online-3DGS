@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_compute_routed_warmup10_fp16_cap60_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-exact-replay-mb3-smoke50"
+  end_cutoff: 422
+
+Testset:
+  name: "PanoAir-tgbr-exact-replay-mb3-smoke50"
+  end_cutoff: 422
+
+StreamingAppearanceLOD:
+  exact_replay_microbatch_size: 3

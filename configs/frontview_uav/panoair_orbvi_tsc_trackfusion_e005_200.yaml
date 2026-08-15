@@ -1,0 +1,15 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_r0p3_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-trackfusion-e005-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-trackfusion-e005-200"
+
+FrontViewTrackFusion:
+  enabled: true
+  color_ema: 0.05
+  max_color_step: 0.10
+  shuffle_identity: false
+  shuffle_seed: 42
+  shuffle_depth_edges_m: [20.0, 50.0, 80.0]

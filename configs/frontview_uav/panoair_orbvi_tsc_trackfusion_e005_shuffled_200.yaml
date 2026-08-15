@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_trackfusion_e005_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-trackfusion-e005-shuffled-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-trackfusion-e005-shuffled-200"
+
+FrontViewTrackFusion:
+  shuffle_identity: true

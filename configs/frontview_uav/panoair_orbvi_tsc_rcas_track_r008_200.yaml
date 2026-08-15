@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_rcas_r008_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-rcas-track-r008-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-rcas-track-r008-200"
+
+FrontViewScaleCover:
+  appearance_allow_sparse: true

@@ -10,6 +10,8 @@ DEFAULT_FRONT_VIEW_SCALE_COVER_CONFIG = {
     "enabled": False,
     "query_backend": "scipy_kdtree",
     "reuse_same_epoch_admission": False,
+    "target_size_mode": "view_scale",
+    "distance_mode": "fixed_radius",
     "radius_multiplier": 1.0,
     "scale_compatibility": 1.0,
     "color_distance_threshold": -1.0,
@@ -84,6 +86,16 @@ def validate_front_view_scale_cover_config(config=None):
         raise ValueError(
             "FrontViewScaleCover.query_backend must be scipy_kdtree or "
             "pytorch3d_knn"
+        )
+    if merged["target_size_mode"] not in ("view_scale", "gaussian_support"):
+        raise ValueError(
+            "FrontViewScaleCover.target_size_mode must be view_scale or "
+            "gaussian_support"
+        )
+    if merged["distance_mode"] not in ("fixed_radius", "gaussian_overlap"):
+        raise ValueError(
+            "FrontViewScaleCover.distance_mode must be fixed_radius or "
+            "gaussian_overlap"
         )
     for key in (
         "enabled",
@@ -555,12 +567,20 @@ class FrontViewScaleCover:
         view_scale_size,
         sparse_valid,
         frame_id,
+        gaussian_scales=None,
     ):
         depths = np.asarray(depths, dtype=np.float32).reshape(-1)
         sparse_valid = np.asarray(sparse_valid, dtype=np.bool_).reshape(-1)
         if depths.shape != sparse_valid.shape:
             raise ValueError("Footprint depths and source masks must align")
         scalar_size = self._target_scale(view_scale_size)
+        if self.config["target_size_mode"] == "gaussian_support":
+            if gaussian_scales is None:
+                raise ValueError(
+                    "Gaussian-support target sizing requires Gaussian scales"
+                )
+            sizes = self._target_scales(gaussian_scales, len(depths))
+            return sizes.astype(np.float32, copy=False)
         if not self.config["per_candidate_footprints"]:
             return np.full(depths.shape, scalar_size, dtype=np.float32)
         focal_pixels = float(focal_pixels)
@@ -1265,6 +1285,11 @@ class FrontViewScaleCover:
         scale_compatible = tree_scales[safe_indices] <= (
             target_sizes[:, None] * float(self.config["scale_compatibility"])
         )
+        if self.config["distance_mode"] == "gaussian_overlap":
+            overlap_radius = np.sqrt(
+                target_sizes[:, None] ** 2 + tree_scales[safe_indices] ** 2
+            )
+            valid &= distances <= overlap_radius
         threshold = float(self.config["color_distance_threshold"])
         if threshold >= 0.0:
             color_distance = np.linalg.norm(
@@ -1375,7 +1400,11 @@ class FrontViewScaleCover:
             raise ValueError("Scale-cover appearance eligibility must align")
         view_directions = self._view_directions(view_directions, len(points))
         target_sizes = self._target_scales(target_size, len(points))
-        radii = target_sizes * float(self.config["radius_multiplier"])
+        if self.config["distance_mode"] == "gaussian_overlap":
+            compatibility = float(self.config["scale_compatibility"])
+            radii = target_sizes * np.sqrt(1.0 + compatibility * compatibility)
+        else:
+            radii = target_sizes * float(self.config["radius_multiplier"])
         (
             occupied,
             nearby,

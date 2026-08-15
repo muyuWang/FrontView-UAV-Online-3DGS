@@ -1,0 +1,79 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo/360DVO_tokyo_citywalk_orb.yaml
+Dataset:
+  name: 360DVO-TGBR75-tokyo-citywalk
+Testset:
+  name: 360DVO-TGBR75-tokyo-citywalk
+Results:
+  save_dir: /home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_360dvo_tgbr75
+  save_gt: false
+  save_exr: false
+  save_mesh: false
+  skip_eval: false
+Mapper:
+  use_multi_reso: false
+  initialization_frames: 4
+  optimization_iters: 10
+  initialization_iters: 10
+  post_refinement:
+    max_steps: 100
+    opt_cam: false
+  KFGraph:
+    kf_interval: 1
+    global_window_size: 4
+  CameraOptimizer:
+    pose_refine_init_steps: 0
+    pose_opt_steps: 4
+Model:
+  sh_degree: 3
+  extra_pts_num: 3200
+  err_threshold: 0.05
+  camera_scale_rescalar: 0.25
+  scene_scale: 1.0
+HashBlock:
+  use_hash: false
+FrontViewSampling:
+  enabled: true
+  selection_mode: depth_stratified
+  pool_multiplier: 2
+  evidence_fraction: 0.5
+  reference_frames: 2
+  photo_sigma: 0.08
+  photo_mode: consistency
+  parallax_reference_deg: 2.0
+  parallax_floor: 0.25
+  confidence_power: 1.0
+  shuffle_evidence: false
+  shuffle_seed: 42
+  depth_edges_m:
+  - 20.0
+  - 50.0
+  depth_fractions:
+  - 0.25
+  - 0.45
+  - 0.3
+FrontViewFarField:
+  enabled: true
+  depth_m: 80.0
+  projective_cell_px: 12
+  depth_bin_ratio: 1.1
+  shuffle_responsibility: false
+  shuffle_seed: 42
+FrontViewScaleCover:
+  enabled: true
+  radius_multiplier: 0.3
+  scale_compatibility: 1.0
+  neighbors: 32
+  rebuild_rows: 8192
+  color_distance_threshold: 0.15
+  shuffle_occupancy: false
+  shuffle_seed: 42
+StreamingAppearanceLOD:
+  enabled: true
+  birth_degree: 2
+  target_degree: 3
+  min_views: 2
+  max_target_fraction: 0.75
+  promotion_interval: 10
+  selection_mode: gradient_agreement
+  utility_ema_decay: 0.9
+  shuffle_seed: 43

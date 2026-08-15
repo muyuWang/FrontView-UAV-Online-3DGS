@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_residual_retire_opacity_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-residual-retire-gradient-expansion-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-residual-retire-gradient-expansion-200"
+
+FrontViewResidualCover:
+  retirement_score_mode: "gradient"
+  retirement_expansion_weight: 1.0

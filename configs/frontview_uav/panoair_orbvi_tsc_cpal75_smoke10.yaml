@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_cpal75_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-cpal75-smoke10"
+  stride: 20
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-cpal75-smoke10"
+  stride: 20
+
+Results:
+  skip_eval: true

@@ -1,0 +1,25 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pbsd_hashless_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-residual-utility-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-residual-utility-200"
+
+FrontViewResidualCover:
+  enabled: true
+  selection_mode: "utility"
+  pool_multiplier: 2
+  budget_scale: 0.78
+  depth_edges_m: [20.0, 50.0]
+  depth_fractions: [0.25, 0.45, 0.30]
+  initial_opacity: 0.5
+  support_sigma_multiplier: 3.0
+  min_support_radius_px: 1
+  max_support_radius_px: 3
+  confidence_power: 1.0
+  confidence_floor: 0.25
+  area_normalization_power: 0.0
+  shuffle_evidence: false
+  shuffle_seed: 42
+  refill_depthcov_pool: true

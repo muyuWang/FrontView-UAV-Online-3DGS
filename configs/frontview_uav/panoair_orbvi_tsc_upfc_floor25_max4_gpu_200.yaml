@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_upfc_floor25_gpu_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-upfc-floor25-max4-gpu-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-upfc-floor25-max4-gpu-200"
+
+FrontViewScaleCover:
+  footprint_ratio_max: 4.0

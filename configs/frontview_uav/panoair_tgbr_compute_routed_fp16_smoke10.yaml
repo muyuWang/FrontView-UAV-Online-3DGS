@@ -1,0 +1,13 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_compute_routed_fp16_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-compute-routed-fp16-smoke10"
+  end_cutoff: 462
+
+Testset:
+  name: "PanoAir-tgbr-compute-routed-fp16-smoke10"
+  end_cutoff: 462
+
+StreamingAppearanceLOD:
+  min_views: 1
+  promotion_interval: 1

@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_pqr_sh2_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-pcpr-fixed1900-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-pcpr-fixed1900-full"
+
+FrontViewScaleCover:
+  projective_revisit_gate: "fixed_frame"
+  revisit_fixed_start_frame: 1900

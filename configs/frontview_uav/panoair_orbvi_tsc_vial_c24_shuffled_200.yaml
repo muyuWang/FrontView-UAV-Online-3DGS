@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_vial_c24_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-vial-c24-shuffled-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-vial-c24-shuffled-200"
+
+FrontViewSampling:
+  shuffle_anchor_coverage: true

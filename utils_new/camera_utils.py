@@ -116,9 +116,37 @@ class Camera_Optimizer:
             self.total_num += 1
             assert self.total_num <= self.max_num
 
-    def step(self):
+    def step(
+        self,
+        replay_steps=0,
+        gradient_decay=1.0,
+        learning_rate_scale=1.0,
+    ):
         if self.use_camera_opt:
-            self.optimizer.step()
+            replay_steps = int(replay_steps)
+            gradient_decay = float(gradient_decay)
+            if replay_steps < 0:
+                raise ValueError("Camera replay steps must be non-negative")
+            if not 0.0 <= gradient_decay <= 1.0:
+                raise ValueError("Camera replay gradient decay must be in [0, 1]")
+            learning_rate_scale = float(learning_rate_scale)
+            learning_rates = [
+                float(group["lr"]) for group in self.optimizer.param_groups
+            ]
+            try:
+                for group in self.optimizer.param_groups:
+                    group["lr"] *= learning_rate_scale
+                for replay_index in range(replay_steps + 1):
+                    self.optimizer.step()
+                    if replay_index < replay_steps:
+                        gradient = self.embeds.weight.grad
+                        if gradient is not None:
+                            gradient.mul_(gradient_decay)
+            finally:
+                for group, learning_rate in zip(
+                    self.optimizer.param_groups, learning_rates
+                ):
+                    group["lr"] = learning_rate
             self.optimizer.zero_grad(set_to_none=True)
 
 
@@ -173,9 +201,37 @@ class SE3_Camera_Optimizer:
             self.total_num += 1
             assert self.total_num <= self.max_num
 
-    def step(self):
+    def step(
+        self,
+        replay_steps=0,
+        gradient_decay=1.0,
+        learning_rate_scale=1.0,
+    ):
         if self.use_camera_opt:
-            self.optimizer.step()
+            replay_steps = int(replay_steps)
+            gradient_decay = float(gradient_decay)
+            if replay_steps < 0:
+                raise ValueError("Camera replay steps must be non-negative")
+            if not 0.0 <= gradient_decay <= 1.0:
+                raise ValueError("Camera replay gradient decay must be in [0, 1]")
+            learning_rate_scale = float(learning_rate_scale)
+            learning_rates = [
+                float(group["lr"]) for group in self.optimizer.param_groups
+            ]
+            try:
+                for group in self.optimizer.param_groups:
+                    group["lr"] *= learning_rate_scale
+                for replay_index in range(replay_steps + 1):
+                    self.optimizer.step()
+                    if replay_index < replay_steps:
+                        gradient = self.embeds.weight.grad
+                        if gradient is not None:
+                            gradient.mul_(gradient_decay)
+            finally:
+                for group, learning_rate in zip(
+                    self.optimizer.param_groups, learning_rates
+                ):
+                    group["lr"] = learning_rate
             self.optimizer.zero_grad(set_to_none=True)
 
 

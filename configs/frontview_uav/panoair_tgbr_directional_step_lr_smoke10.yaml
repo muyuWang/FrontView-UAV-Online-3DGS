@@ -1,0 +1,19 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_compute_routed_fp16_smoke10.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-directional-step-lr-smoke10"
+
+Testset:
+  name: "PanoAir-tgbr-directional-step-lr-smoke10"
+
+StreamingAppearanceLOD:
+  max_target_fraction: 0.60
+  compute_routing_warmup_evidence_updates: 10
+  directional_step_budget_enabled: true
+  directional_step_budget_selection_mode: "shuffled"
+  directional_step_budget_warmup_keyframes: 1
+  directional_step_budget_very_low_steps: 6
+  directional_step_budget_low_steps: 8
+  directional_step_budget_shuffle_very_low_fraction: 1.0
+  directional_step_budget_shuffle_low_fraction: 0.0
+  directional_step_budget_lr_compensation: true

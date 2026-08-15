@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_residual_retire_late170_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-residual-retire-late170-shuffled-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-residual-retire-late170-shuffled-full"
+
+FrontViewResidualCover:
+  shuffle_retirement: true

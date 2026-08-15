@@ -16,20 +16,52 @@ from utils_new.camera_utils import Camera, unproject_pts_tensor
 from utils_new.aerocommit.types import CommitResult, GaussianProposalBatch
 from utils_new.frontview_observability import (
     parallax_learning_scale,
+    matched_events_within_log_depth_regimes,
+    posterior_information_scale,
     precondition_raywise_gradient,
+    project_raywise_update,
+    release_owned_scale_caps,
+    resolved_footprint_mask,
+    resolution_information_scale,
+    shuffle_within_log_depth_regimes,
 )
 from utils_new.frontview_coverage_recovery import (
     SparseFarDepthPrior,
     apply_sparse_depth_prior_fallback,
     apply_visible_surface_depth_fallback,
     motion_conditioned_depth_floor,
+    posterior_inverse_depth_fusion,
     residual_grid_indices,
     validate_front_view_coverage_recovery_config,
 )
+from utils_new.frontview_causal_metric_birth import (
+    CausalMetricBirth,
+    bind_tracks_to_proxy_slots,
+    causal_birth_replaces_depth_fallback,
+    fuse_candidate_log_depth_posteriors,
+    validate_causal_metric_birth_config,
+)
+from utils_new.frontview_track_depth_gauge import cross_fitted_track_depth_gauge
+from utils_new.frontview_causal_landmark_memory import (
+    CausalPersistentLandmarkMemory,
+    information_gain_transport,
+    validate_causal_landmark_memory_config,
+)
+from utils_new.frontview_dual_responsibility import (
+    causal_finite_depth_certificates,
+    geometry_decision_render,
+    nearest_unique_replacement_positions,
+    proposal_metric_confidences,
+    validate_causal_dual_responsibility_config,
+)
 from utils_new.frontview_sampling import (
+    adaptive_log_depth_indices,
     depth_stratified_indices,
     evidence_balanced_indices,
     projective_coverage_indices,
+    rate_distortion_density_weights,
+    residual_rate_distortion_radius_factors,
+    residual_importance_indices,
 )
 from utils_new.frontview_depth_transport import (
     split_depth_anchors,
@@ -45,8 +77,29 @@ from utils_new.frontview_birth import (
     validate_front_view_birth_config,
 )
 from utils_new.frontview_far_field import (
+    CausalRayResponsibilityAtlas,
+    budgeted_fallback_radius,
+    budget_cell_parameters,
+    far_field_responsibility_mask,
+    matched_responsibility_shuffle,
+    observability_footprint_trust_limits,
+    projected_gaussian_radii,
+    projective_map_redundancy_mask,
+    projective_map_posterior_log_odds,
+    posterior_budget_refill_mask,
+    projective_radial_scale_factors,
     projective_survivor_mask,
+    ray_aligned_quaternions,
     validate_front_view_far_field_config,
+    visible_parallax_pixels,
+)
+from utils_new.frontview_inverse_depth_certificate import (
+    causal_inverse_depth_posterior,
+    validate_front_view_inverse_depth_certificate_config,
+)
+from utils_new.frontview_projective_structure import (
+    budget_normalized_information_radii,
+    structure_aligned_covariances,
 )
 from utils_new.frontview_directional_layer import (
     FrontViewDirectionalLayer,
@@ -79,6 +132,11 @@ from utils_new.streaming_appearance_lod import (
     sh_band_bounds,
     validate_streaming_appearance_lod_config,
 )
+from utils_new.tgbr_sparse_model import (
+    decode_tgbr_sparse_sh,
+    is_tgbr_sparse_ply,
+    write_tgbr_sparse_ply,
+)
 from utils_new.aerocommit.frequency_sampling import (
     frequency_evidence_map,
     frequency_footprint_log_offset,
@@ -90,6 +148,7 @@ from utils_new.aerocommit.sparse_track_geometry import (
 )
 from utils_new.aerocommit.stable_detail_split import split_gaussian_parameters
 from utils_new.hash_utils import HashBlock
+from utils_new.heterogeneous_sh_rasterizer import heterogeneous_sh_rasterization
 from utils_new.logging_utils import Log
 from utils_new.tool_utils import BasicPointCloud, inverse_sigmoid, rgb_to_sh_np
 
@@ -157,6 +216,16 @@ class Gaussians:
             "max_scale_expansions": torch.full(
                 (1,), float("inf"), dtype=torch.float32
             ),
+            "footprint_trust_mask": torch.zeros((1,), dtype=torch.bool),
+            "footprint_target_scales": torch.full(
+                (1,), float("inf"), dtype=torch.float32
+            ),
+            "footprint_release_scale_expansions": torch.full(
+                (1,), float("inf"), dtype=torch.float32
+            ),
+            "footprint_evidence_pending_mask": torch.zeros(
+                (1,), dtype=torch.bool
+            ),
             "mean_anchors": _xyz.detach().clone(),
             "max_mean_displacements": torch.full(
                 (1,), float("inf"), dtype=torch.float32
@@ -165,9 +234,12 @@ class Gaussians:
             "reference_camera_centers": torch.zeros((1, 3), dtype=torch.float32),
             "reference_rays": torch.zeros((1, 3), dtype=torch.float32),
             "max_parallax_sin2": torch.zeros((1,), dtype=torch.float32),
+            "birth_log_depth_stds": torch.zeros((1,), dtype=torch.float32),
             "track_ids": torch.full((1,), -1, dtype=torch.long),
             "gaussian_uids": torch.full((1,), -1, dtype=torch.long),
             "birth_frame_ids": torch.full((1,), -1, dtype=torch.long),
+            "metric_confidences": torch.ones((1,), dtype=torch.float32),
+            "uncertainty_confidences": torch.ones((1,), dtype=torch.float32),
             "gradient_utility_ema": torch.zeros((1,), dtype=torch.float32),
             "appearance_view_count": torch.zeros((1,), dtype=torch.int32),
             "appearance_radius_sum": torch.zeros((1,), dtype=torch.float32),
@@ -452,6 +524,64 @@ class Gaussians:
             ],
             dim=0,
         )
+        footprint_mask = new_params.get("footprint_trust_mask")
+        if footprint_mask is None:
+            footprint_mask = torch.zeros(
+                (new_params["means"].shape[0],),
+                device=new_params["means"].device,
+                dtype=torch.bool,
+            )
+        footprint_targets = new_params.get("footprint_target_scales")
+        if footprint_targets is None:
+            footprint_targets = torch.full(
+                (new_params["means"].shape[0],),
+                float("inf"),
+                device=new_params["means"].device,
+                dtype=torch.float32,
+            )
+        self.non_trainable_params["footprint_trust_mask"] = torch.cat(
+            (
+                self.non_trainable_params["footprint_trust_mask"],
+                footprint_mask.detach().to(self.device, dtype=torch.bool),
+            )
+        )
+        self.non_trainable_params["footprint_target_scales"] = torch.cat(
+            (
+                self.non_trainable_params["footprint_target_scales"],
+                footprint_targets.detach().to(self.device, dtype=torch.float32),
+            )
+        )
+        footprint_release_limits = new_params.get(
+            "footprint_release_scale_expansions"
+        )
+        if footprint_release_limits is None:
+            footprint_release_limits = torch.full(
+                (new_params["means"].shape[0],),
+                float("inf"),
+                device=new_params["means"].device,
+                dtype=torch.float32,
+            )
+        self.non_trainable_params["footprint_release_scale_expansions"] = (
+            torch.cat(
+                (
+                    self.non_trainable_params[
+                        "footprint_release_scale_expansions"
+                    ],
+                    footprint_release_limits.detach().to(
+                        self.device, dtype=torch.float32
+                    ),
+                )
+            )
+        )
+        footprint_pending = new_params.get("footprint_evidence_pending_mask")
+        if footprint_pending is None:
+            footprint_pending = footprint_mask
+        self.non_trainable_params["footprint_evidence_pending_mask"] = torch.cat(
+            (
+                self.non_trainable_params["footprint_evidence_pending_mask"],
+                footprint_pending.detach().to(self.device, dtype=torch.bool),
+            )
+        )
         mean_anchors = new_params.get("mean_anchors", new_params["means"])
         max_mean_displacements = new_params.get("max_mean_displacements")
         if max_mean_displacements is None:
@@ -495,6 +625,13 @@ class Gaussians:
                 device=new_params["means"].device,
                 dtype=torch.float32,
             )
+        birth_log_depth_stds = new_params.get("birth_log_depth_stds")
+        if birth_log_depth_stds is None:
+            birth_log_depth_stds = torch.zeros(
+                (new_params["means"].shape[0],),
+                device=new_params["means"].device,
+                dtype=torch.float32,
+            )
         self.non_trainable_params["directional_observability_mask"] = torch.cat(
             (
                 self.non_trainable_params["directional_observability_mask"],
@@ -517,6 +654,12 @@ class Gaussians:
             (
                 self.non_trainable_params["max_parallax_sin2"],
                 max_parallax_sin2.detach().to(self.device, dtype=torch.float32),
+            )
+        )
+        self.non_trainable_params["birth_log_depth_stds"] = torch.cat(
+            (
+                self.non_trainable_params["birth_log_depth_stds"],
+                birth_log_depth_stds.detach().to(self.device, dtype=torch.float32),
             )
         )
         track_ids = new_params.get("track_ids")
@@ -561,6 +704,30 @@ class Gaussians:
                 birth_frame_ids.detach().to(self.device, dtype=torch.long),
             )
         )
+        metric_confidences = new_params.get("metric_confidences")
+        if metric_confidences is None:
+            metric_confidences = torch.ones(
+                (new_params["means"].shape[0],),
+                device=new_params["means"].device,
+                dtype=torch.float32,
+            )
+        self.non_trainable_params["metric_confidences"] = torch.cat(
+            (
+                self.non_trainable_params["metric_confidences"],
+                metric_confidences.detach().to(self.device, dtype=torch.float32),
+            )
+        )
+        uncertainty_confidences = new_params.get("uncertainty_confidences")
+        if uncertainty_confidences is None:
+            uncertainty_confidences = metric_confidences
+        self.non_trainable_params["uncertainty_confidences"] = torch.cat(
+            (
+                self.non_trainable_params["uncertainty_confidences"],
+                uncertainty_confidences.detach().to(
+                    self.device, dtype=torch.float32
+                ),
+            )
+        )
         gradient_utility_ema = new_params.get("gradient_utility_ema")
         if gradient_utility_ema is None:
             gradient_utility_ema = torch.zeros(
@@ -600,12 +767,15 @@ class Gaussians:
             )
         )
         if "appearance_band_gradient_ema" in self.non_trainable_params:
-            width = self.non_trainable_params["appearance_band_gradient_ema"].shape[1]
+            gradient_ema = self.non_trainable_params[
+                "appearance_band_gradient_ema"
+            ]
+            width = gradient_ema.shape[1]
             self.non_trainable_params["appearance_band_gradient_ema"] = torch.cat(
                 (
-                    self.non_trainable_params["appearance_band_gradient_ema"],
+                    gradient_ema,
                     torch.zeros(
-                        (count, width), device=self.device, dtype=torch.float32
+                        (count, width), device=self.device, dtype=gradient_ema.dtype
                     ),
                 )
             )
@@ -656,6 +826,38 @@ class Gaussians:
         self.non_trainable_params["max_scale_expansions"] = expansion.detach().to(
             self.device, dtype=torch.float32
         )
+        footprint_mask = params.get("footprint_trust_mask")
+        if footprint_mask is None:
+            footprint_mask = torch.zeros(count, device=self.device, dtype=torch.bool)
+        footprint_targets = params.get("footprint_target_scales")
+        if footprint_targets is None:
+            footprint_targets = torch.full(
+                (count,), float("inf"), device=self.device, dtype=torch.float32
+            )
+        self.non_trainable_params["footprint_trust_mask"] = footprint_mask.detach().to(
+            self.device, dtype=torch.bool
+        )
+        self.non_trainable_params["footprint_target_scales"] = (
+            footprint_targets.detach().to(self.device, dtype=torch.float32)
+        )
+        footprint_release_limits = params.get(
+            "footprint_release_scale_expansions"
+        )
+        if footprint_release_limits is None:
+            footprint_release_limits = torch.full(
+                (count,), float("inf"), device=self.device, dtype=torch.float32
+            )
+        self.non_trainable_params["footprint_release_scale_expansions"] = (
+            footprint_release_limits.detach().to(
+                self.device, dtype=torch.float32
+            )
+        )
+        footprint_pending = params.get("footprint_evidence_pending_mask")
+        if footprint_pending is None:
+            footprint_pending = footprint_mask
+        self.non_trainable_params["footprint_evidence_pending_mask"] = (
+            footprint_pending.detach().to(self.device, dtype=torch.bool)
+        )
         mean_anchors = params.get("mean_anchors", self.splats["means"].detach())
         self.non_trainable_params["mean_anchors"] = mean_anchors.detach().to(
             self.device, dtype=torch.float32
@@ -685,6 +887,11 @@ class Gaussians:
             max_parallax_sin2 = torch.zeros(
                 count, device=self.device, dtype=torch.float32
             )
+        birth_log_depth_stds = params.get("birth_log_depth_stds")
+        if birth_log_depth_stds is None:
+            birth_log_depth_stds = torch.zeros(
+                count, device=self.device, dtype=torch.float32
+            )
         self.non_trainable_params["directional_observability_mask"] = (
             directional_mask.detach().to(self.device, dtype=torch.bool)
         )
@@ -696,6 +903,9 @@ class Gaussians:
         )
         self.non_trainable_params["max_parallax_sin2"] = (
             max_parallax_sin2.detach().to(self.device, dtype=torch.float32)
+        )
+        self.non_trainable_params["birth_log_depth_stds"] = (
+            birth_log_depth_stds.detach().to(self.device, dtype=torch.float32)
         )
         track_ids = params.get("track_ids")
         if track_ids is None:
@@ -721,6 +931,20 @@ class Gaussians:
         self.non_trainable_params["birth_frame_ids"] = birth_frame_ids.detach().to(
             self.device, dtype=torch.long
         )
+        metric_confidences = params.get("metric_confidences")
+        if metric_confidences is None:
+            metric_confidences = torch.ones(
+                (count,), device=self.device, dtype=torch.float32
+            )
+        self.non_trainable_params["metric_confidences"] = (
+            metric_confidences.detach().to(self.device, dtype=torch.float32)
+        )
+        uncertainty_confidences = params.get("uncertainty_confidences")
+        if uncertainty_confidences is None:
+            uncertainty_confidences = metric_confidences
+        self.non_trainable_params["uncertainty_confidences"] = (
+            uncertainty_confidences.detach().to(self.device, dtype=torch.float32)
+        )
         gradient_utility_ema = params.get("gradient_utility_ema")
         if gradient_utility_ema is None:
             gradient_utility_ema = torch.zeros(
@@ -742,9 +966,12 @@ class Gaussians:
             count, device=self.device, dtype=torch.float32
         )
         if "appearance_band_gradient_ema" in self.non_trainable_params:
-            width = self.non_trainable_params["appearance_band_gradient_ema"].shape[1]
+            gradient_ema = self.non_trainable_params[
+                "appearance_band_gradient_ema"
+            ]
+            width = gradient_ema.shape[1]
             self.non_trainable_params["appearance_band_gradient_ema"] = torch.zeros(
-                (count, width), device=self.device, dtype=torch.float32
+                (count, width), device=self.device, dtype=gradient_ema.dtype
             )
         self.non_trainable_params["appearance_sh_degree"] = torch.zeros(
             count, device=self.device, dtype=torch.uint8
@@ -767,11 +994,19 @@ class Gaussians:
         init_scale=1e-4,
         initial_opacity=0.5,
         max_scale_expansion=None,
+        footprint_trust_mask=None,
+        footprint_target_scales=None,
+        footprint_release_scale_expansions=None,
         directional_observability_mask=None,
+        directional_log_depth_stds=None,
+        directional_initial_max_parallax_sin2=None,
         reference_camera_center=None,
         track_ids=None,
         gaussian_uids=None,
         birth_frame_ids=None,
+        metric_confidences=None,
+        uncertainty_confidences=None,
+        initial_quaternions=None,
     ):
         xyz = torch.from_numpy(np.asarray(pts)).float().to(self.device)
         sh0 = (
@@ -832,8 +1067,23 @@ class Gaussians:
         else:
             raise NotImplementedError("init_scale should be either float or np.ndarray")
 
-        quats = torch.zeros((xyz.shape[0], 4), device=self.device, dtype=torch.float32)
-        quats[:, 0] = 1
+        if initial_quaternions is None:
+            quats = torch.zeros(
+                (xyz.shape[0], 4), device=self.device, dtype=torch.float32
+            )
+            quats[:, 0] = 1
+        else:
+            quats = torch.as_tensor(
+                initial_quaternions, device=self.device, dtype=torch.float32
+            )
+            if quats.shape != (xyz.shape[0], 4) or not bool(
+                torch.all(torch.isfinite(quats))
+            ):
+                raise ValueError("Initial quaternions must be finite [N, 4]")
+            norms = torch.linalg.vector_norm(quats, dim=1, keepdim=True)
+            if bool(torch.any(norms <= 1.0e-8)):
+                raise ValueError("Initial quaternions must be nonzero")
+            quats = quats / norms
 
         new_params = {
             "means": xyz,
@@ -867,6 +1117,26 @@ class Gaussians:
             if birth_tensor.shape != (xyz.shape[0],):
                 raise ValueError("Birth frame IDs must match Gaussian rows")
             new_params["birth_frame_ids"] = birth_tensor
+        if metric_confidences is not None:
+            metric_tensor = torch.as_tensor(
+                metric_confidences, device=self.device, dtype=torch.float32
+            ).reshape(-1)
+            if metric_tensor.shape != (xyz.shape[0],) or bool(
+                torch.any(~torch.isfinite(metric_tensor))
+            ) or bool(torch.any((metric_tensor < 0.0) | (metric_tensor > 1.0))):
+                raise ValueError("Metric confidences must lie in [0, 1]")
+            new_params["metric_confidences"] = metric_tensor
+        if uncertainty_confidences is not None:
+            uncertainty_tensor = torch.as_tensor(
+                uncertainty_confidences, device=self.device, dtype=torch.float32
+            ).reshape(-1)
+            if uncertainty_tensor.shape != (xyz.shape[0],) or bool(
+                torch.any(~torch.isfinite(uncertainty_tensor))
+            ) or bool(
+                torch.any((uncertainty_tensor < 0.0) | (uncertainty_tensor > 1.0))
+            ):
+                raise ValueError("Uncertainty confidences must lie in [0, 1]")
+            new_params["uncertainty_confidences"] = uncertainty_tensor
         if directional_observability_mask is not None:
             directional_mask = torch.as_tensor(
                 directional_observability_mask, device=self.device, dtype=torch.bool
@@ -884,14 +1154,39 @@ class Gaussians:
             reference_rays = torch.nn.functional.normalize(
                 xyz - reference_centers, dim=1, eps=1.0e-8
             )
+            log_depth_stds = torch.as_tensor(
+                directional_log_depth_stds,
+                device=self.device,
+                dtype=torch.float32,
+            ).reshape(-1)
+            if log_depth_stds.shape != (xyz.shape[0],):
+                raise ValueError("Directional log-depth priors must match Gaussian rows")
+            if not bool(torch.all(torch.isfinite(log_depth_stds))) or bool(
+                torch.any(log_depth_stds < 0.0)
+            ):
+                raise ValueError("Directional log-depth priors must be finite")
+            initial_parallax = (
+                torch.zeros(
+                    xyz.shape[0], device=self.device, dtype=torch.float32
+                )
+                if directional_initial_max_parallax_sin2 is None
+                else torch.as_tensor(
+                    directional_initial_max_parallax_sin2,
+                    device=self.device,
+                    dtype=torch.float32,
+                ).reshape(-1)
+            )
+            if initial_parallax.shape != (xyz.shape[0],) or bool(
+                torch.any(~torch.isfinite(initial_parallax))
+            ) or bool(torch.any((initial_parallax < 0.0) | (initial_parallax > 1.0))):
+                raise ValueError("Initial parallax evidence must lie in [0, 1]")
             new_params.update(
                 {
                     "directional_observability_mask": directional_mask,
                     "reference_camera_centers": reference_centers,
                     "reference_rays": reference_rays,
-                    "max_parallax_sin2": torch.zeros(
-                        xyz.shape[0], device=self.device, dtype=torch.float32
-                    ),
+                    "max_parallax_sin2": initial_parallax,
+                    "birth_log_depth_stds": log_depth_stds,
                 }
             )
         if max_scale_expansion is None:
@@ -912,6 +1207,32 @@ class Gaussians:
             if expansion.shape != (xyz.shape[0],):
                 raise ValueError("Scale expansion limits must match Gaussian rows")
             new_params["max_scale_expansions"] = expansion
+        if footprint_trust_mask is not None:
+            trust_mask = torch.as_tensor(
+                footprint_trust_mask, device=self.device, dtype=torch.bool
+            ).reshape(-1)
+            targets = torch.as_tensor(
+                footprint_target_scales, device=self.device, dtype=torch.float32
+            ).reshape(-1)
+            if trust_mask.shape != (xyz.shape[0],) or targets.shape != (xyz.shape[0],):
+                raise ValueError("Footprint trust state must match Gaussian rows")
+            if bool(torch.any(trust_mask & ~torch.isfinite(targets))) or bool(
+                torch.any(targets <= 0.0)
+            ):
+                raise ValueError("Certified footprint targets must be positive")
+            new_params["footprint_trust_mask"] = trust_mask
+            new_params["footprint_target_scales"] = targets
+            new_params["footprint_evidence_pending_mask"] = trust_mask.clone()
+            release_limits = torch.as_tensor(
+                footprint_release_scale_expansions,
+                device=self.device,
+                dtype=torch.float32,
+            ).reshape(-1)
+            if release_limits.shape != (xyz.shape[0],) or bool(
+                torch.any(release_limits <= 0.0)
+            ):
+                raise ValueError("Footprint release limits must match Gaussian rows")
+            new_params["footprint_release_scale_expansions"] = release_limits
 
         self.extend_gaussians(new_params)
 
@@ -965,7 +1286,7 @@ class Gaussians:
             ]
         return removed_track_ids.detach().cpu().numpy()
 
-    def update(self):
+    def optimizer_step(self):
         opacity_gradient = self.splats["opacities"].grad
         if opacity_gradient is not None:
             signal = opacity_gradient.detach().abs().reshape(-1)
@@ -973,9 +1294,22 @@ class Gaussians:
             utility.mul_(0.95).add_(signal, alpha=0.05)
         for optimizer in self.optimizers.values():
             optimizer.step()
-            optimizer.zero_grad()
         self.constrain_scale_expansion()
         self.constrain_mean_displacement()
+
+    @torch.no_grad()
+    def scale_optimizer_gradients(self, factor):
+        for parameter in self.splats.values():
+            if parameter.grad is not None:
+                parameter.grad.mul_(factor)
+
+    def zero_optimizer_gradients(self):
+        for optimizer in self.optimizers.values():
+            optimizer.zero_grad()
+
+    def update(self):
+        self.optimizer_step()
+        self.zero_optimizer_gradients()
 
     @torch.no_grad()
     def set_mean_trust_region(self, max_displacement):
@@ -1032,6 +1366,7 @@ class Gaussians:
     @torch.no_grad()
     def load_from_ply(self, path, max_sh_degree=2):
         plydata = PlyData.read(path)
+        sparse_degrees = None
 
         def fetchPly_nocolor(path):
             plydata = PlyData.read(path)
@@ -1051,25 +1386,50 @@ class Gaussians:
             axis=1,
         )
         opacities = np.asarray(plydata.elements[0]["opacity"])
+        vertex_property_names = {
+            prop.name for prop in plydata.elements[0].properties
+        }
+        metric_confidences = (
+            np.asarray(
+                plydata.elements[0]["metric_confidence"], dtype=np.float32
+            )
+            if "metric_confidence" in vertex_property_names
+            else np.ones((xyz.shape[0],), dtype=np.float32)
+        )
+        uncertainty_confidences = (
+            np.asarray(
+                plydata.elements[0]["uncertainty_confidence"], dtype=np.float32
+            )
+            if "uncertainty_confidence" in vertex_property_names
+            else metric_confidences.copy()
+        )
 
         sh0 = np.zeros((xyz.shape[0], 1, 3))
         sh0[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
         sh0[:, 0, 1] = np.asarray(plydata.elements[0]["f_dc_1"])
         sh0[:, 0, 2] = np.asarray(plydata.elements[0]["f_dc_2"])
 
-        shN = np.zeros((xyz.shape[0], ((max_sh_degree + 1) ** 2 - 1) * 3))
-
-        extra_f_names = [
-            p.name
-            for p in plydata.elements[0].properties
-            if p.name.startswith("f_rest_")
-        ]
-        extra_f_names = sorted(extra_f_names, key=lambda x: int(x.split("_")[-1]))
-        for idx, attr_name in enumerate(extra_f_names):
-            shN[:, idx] = np.asarray(plydata.elements[0][attr_name])
-        shN = shN.reshape((shN.shape[0], 3, (max_sh_degree + 1) ** 2 - 1)).transpose(
-            0, 2, 1
-        )
+        if is_tgbr_sparse_ply(plydata):
+            shN, sparse_degrees, _ = decode_tgbr_sparse_sh(
+                plydata, max_sh_degree
+            )
+        else:
+            shN = np.zeros(
+                (xyz.shape[0], ((max_sh_degree + 1) ** 2 - 1) * 3)
+            )
+            extra_f_names = [
+                p.name
+                for p in plydata.elements[0].properties
+                if p.name.startswith("f_rest_")
+            ]
+            extra_f_names = sorted(
+                extra_f_names, key=lambda x: int(x.split("_")[-1])
+            )
+            for idx, attr_name in enumerate(extra_f_names):
+                shN[:, idx] = np.asarray(plydata.elements[0][attr_name])
+            shN = shN.reshape(
+                (shN.shape[0], 3, (max_sh_degree + 1) ** 2 - 1)
+            ).transpose(0, 2, 1)
 
         scale_names = [
             p.name
@@ -1110,9 +1470,20 @@ class Gaussians:
             "max_scale_expansions": torch.full(
                 (xyz.shape[0],), float("inf"), device=self.device, dtype=torch.float32
             ),
+            "metric_confidences": torch.from_numpy(metric_confidences)
+            .to(self.device, dtype=torch.float32),
+            "uncertainty_confidences": torch.from_numpy(
+                uncertainty_confidences
+            ).to(self.device, dtype=torch.float32),
         }
 
         self.replace_gaussians(new_params)
+        if sparse_degrees is not None:
+            self.non_trainable_params["appearance_sh_degree"].copy_(
+                torch.from_numpy(sparse_degrees).to(
+                    self.device, dtype=torch.uint8
+                )
+            )
 
 
 class GaussianModel:
@@ -1168,14 +1539,23 @@ class GaussianModel:
         self.frozen_geometry_group_ids = set()
         self.frozen_position_group_ids = set()
         self.sh_degree_masks = {}
+        self.frontview_observability_config = dict(
+            configs.get("FrontViewObservability", {})
+        )
+        self._frontview_post_step_projection = {}
         self.frontview_observability_stats = {
             "calls": 0,
             "rows": 0,
+            "learning_scale_mode": None,
+            "optimization_mode": None,
+            "responsibility_scope": None,
             "radial_scale_sum": 0.0,
             "last_rows": 0,
             "last_mean_radial_scale": None,
             "last_unlocked_fraction": None,
             "evidence_updates": 0,
+            "post_step_projection_calls": 0,
+            "post_step_projected_rows": 0,
         }
         self.frontview_coverage_recovery_config = (
             validate_front_view_coverage_recovery_config(
@@ -1185,6 +1565,38 @@ class GaussianModel:
         self.frontview_coverage_depth_prior = SparseFarDepthPrior(
             self.frontview_coverage_recovery_config
         )
+        self.causal_metric_birth_config = validate_causal_metric_birth_config(
+            configs.get("CausalMetricBirth")
+        )
+        self.causal_metric_birth = CausalMetricBirth(
+            self.causal_metric_birth_config, self.device
+        )
+        self.causal_landmark_memory_config = (
+            validate_causal_landmark_memory_config(
+                configs.get("CausalPersistentLandmarkMemory")
+            )
+        )
+        self.causal_landmark_memory = CausalPersistentLandmarkMemory(
+            self.causal_landmark_memory_config
+        )
+        self.causal_dual_responsibility_config = (
+            validate_causal_dual_responsibility_config(
+                configs.get("CausalDualResponsibility")
+            )
+        )
+        self.causal_dual_responsibility_stats = {
+            "metric_rows": 0,
+            "proxy_rows": 0,
+            "partial_metric_rows": 0,
+            "metric_confidence_sum": 0.0,
+            "metric_depth_render_calls": 0,
+            "finite_certificate_calls": 0,
+            "finite_certificate_rows": 0,
+            "finite_certificate_valid_rows": 0,
+            "finite_certificate_observability_sum": 0.0,
+            "finite_certificate_support_sum": 0.0,
+            "finite_certificate_value_sum": 0.0,
+        }
         self.frontview_coverage_depth_stats = {
             "depth_fallback_calls": 0,
             "depth_fallback_rows": 0,
@@ -1196,8 +1608,36 @@ class GaussianModel:
             "depth_fallback_skipped_no_prior": 0,
             "depth_fallback_scaled_rows": 0,
             "last_depth_fallback_frame": -1,
+            "multiview_depth_calls": 0,
+            "multiview_depth_rows": 0,
+            "multiview_depth_supported_rows": 0,
+            "multiview_depth_concentrated_rows": 0,
+            "multiview_depth_score_sum": 0.0,
+            "multiview_depth_concentration_sum": 0.0,
+            "multiview_depth_selected_sum_m": 0.0,
+            "multiview_depth_hypotheses_sum": 0,
+            "multiview_depth_shuffled_calls": 0,
         }
         self.frontview_sampling_config = dict(configs.get("FrontViewSampling", {}))
+        self.frontview_inverse_depth_certificate_config = (
+            validate_front_view_inverse_depth_certificate_config(
+                configs.get("FrontViewInverseDepthCertificate")
+            )
+        )
+        self.frontview_inverse_depth_certificate_stats = {
+            "calls": 0,
+            "rows": 0,
+            "certified_rows": 0,
+            "conflicted_rows": 0,
+            "rejected_conflicted_rows": 0,
+            "projective_uncertified_rows": 0,
+            "information_gain_sum": 0.0,
+            "absolute_log_depth_shift_sum": 0.0,
+            "posterior_log_std_sum": 0.0,
+            "valid_view_sum": 0,
+            "baseline_information_sum": 0.0,
+            "shuffle_calls": 0,
+        }
         self.frontview_sampling_stats = {
             "calls": 0,
             "pool_rows": 0,
@@ -1210,6 +1650,23 @@ class GaussianModel:
             "last_mean_score": None,
             "pool_depth_counts": [0, 0, 0],
             "selected_depth_counts": [0, 0, 0],
+            "adaptive_calls": 0,
+            "adaptive_iterations": 0,
+            "adaptive_objective_sum": 0.0,
+            "adaptive_boundary_sum_m": [0.0, 0.0],
+            "last_adaptive_boundaries_m": [],
+            "adaptive_assigned_pool_counts": [0, 0, 0],
+            "adaptive_quotas": [0, 0, 0],
+            "adaptive_coverage_calls": 0,
+            "adaptive_coverage_cell_pixel_sum": 0.0,
+            "adaptive_coverage_representatives": [0, 0, 0],
+            "rate_distortion_calls": 0,
+            "rate_distortion_cell_pixel_sum": 0.0,
+            "rate_distortion_density_min": None,
+            "rate_distortion_density_max": None,
+            "rate_distortion_shuffled_calls": 0,
+            "posterior_refill_pool_rows": 0,
+            "posterior_refill_primary_rows": 0,
         }
         self.frontview_depth_transport_config = dict(
             configs.get("FrontViewDepthTransport", {})
@@ -1261,13 +1718,98 @@ class GaussianModel:
         self.frontview_far_field_config = validate_front_view_far_field_config(
             configs.get("FrontViewFarField")
         )
+        self.frontview_ray_atlas = CausalRayResponsibilityAtlas(
+            enabled=self.frontview_far_field_config["ray_atlas_enabled"],
+            shuffle_evidence=self.frontview_far_field_config[
+                "ray_atlas_shuffle_evidence"
+            ],
+            seed=self.frontview_far_field_config["shuffle_seed"],
+            coordinate_mode=self.frontview_far_field_config[
+                "ray_atlas_coordinate_mode"
+            ],
+            competition_mode=self.frontview_far_field_config[
+                "ray_atlas_competition_mode"
+            ],
+        )
         self.frontview_far_field_stats = {
             "host_rows": 0,
             "commit_rows": 0,
             "hash_bypass_rows": 0,
             "projective_rejected_rows": 0,
+            "unobservable_rejected_rows": 0,
             "hash_query_rows": 0,
             "hash_set_rows": 0,
+            "exact_sparse_world_rows": 0,
+            "identity_route_calls": 0,
+            "identity_route_rows": 0,
+            "persistent_identity_rows": 0,
+            "sparse_missing_identity_rows": 0,
+            "identity_far_field_rows": 0,
+            "causal_route_calls": 0,
+            "causal_route_rows": 0,
+            "causal_visible_rows": 0,
+            "causal_projective_rows": 0,
+            "causal_metric_depthcov_rows": 0,
+            "causal_parallax_pixel_sum": 0.0,
+            "causal_support_pixel_sum": 0.0,
+            "causal_log_depth_std_sum": 0.0,
+            "responsibility_shuffle_calls": 0,
+            "responsibility_shuffled_rows": 0,
+            "footprint_trust_calls": 0,
+            "footprint_trust_rows": 0,
+            "footprint_trust_bounded_rows": 0,
+            "footprint_trust_information_sum": 0.0,
+            "footprint_trust_limit_sum": 0.0,
+            "footprint_trust_cell_pixel_sum": 0.0,
+            "footprint_trust_shuffled_calls": 0,
+            "footprint_trust_projective_scope_calls": 0,
+            "footprint_trust_owner_area_calls": 0,
+            "footprint_trust_owner_area_rows": 0,
+            "footprint_trust_residual_rd_calls": 0,
+            "footprint_trust_residual_rd_rows": 0,
+            "footprint_trust_residual_rd_radius_sum": 0.0,
+            "footprint_trust_dynamic_calls": 0,
+            "footprint_trust_dynamic_rows": 0,
+            "footprint_trust_dynamic_released_rows": 0,
+            "footprint_trust_dynamic_shuffled_calls": 0,
+            "adaptive_route_calls": 0,
+            "adaptive_route_far_rows": 0,
+            "adaptive_route_iterations": 0,
+            "adaptive_route_objective_sum": 0.0,
+            "adaptive_route_boundary_sum_m": [0.0, 0.0],
+            "adaptive_route_regime_counts": [0, 0, 0],
+            "last_adaptive_route_boundaries_m": [],
+            "map_gate_calls": 0,
+            "map_gate_rows": 0,
+            "map_gate_rejected_rows": 0,
+            "map_gate_residual_scale_sum": 0.0,
+            "map_gate_photometric_calls": 0,
+            "map_gate_shuffled_calls": 0,
+            "posterior_refill_calls": 0,
+            "posterior_refill_requested_rows": 0,
+            "posterior_refill_reserve_rows": 0,
+            "posterior_refill_selected_rows": 0,
+            "posterior_refill_shuffled_calls": 0,
+            "adaptive_nms_calls": 0,
+            "adaptive_nms_rows": 0,
+            "adaptive_nms_rejected_rows": 0,
+            "budget_nms_calls": 0,
+            "budget_nms_cell_pixel_sum": 0.0,
+            "budget_nms_log_depth_width_sum": 0.0,
+            "projective_covariance_rows": 0,
+            "projective_radial_factor_sum": 0.0,
+            "projective_radial_factor_min": None,
+            "projective_radial_factor_max": None,
+            "fallback_support_rows": 0,
+            "fallback_information_rows": 0,
+            "fallback_information_radius_factor_sum": 0.0,
+            "fallback_information_radius_factor_min": None,
+            "fallback_information_radius_factor_max": None,
+            "fallback_information_density_sum": 0.0,
+            "fallback_information_shuffled_calls": 0,
+            "fallback_structure_rows": 0,
+            "fallback_anisotropy_sum": 0.0,
+            "fallback_anisotropy_max": None,
         }
         self.frontview_directional_layer_config = (
             validate_front_view_directional_layer_config(
@@ -1293,6 +1835,14 @@ class GaussianModel:
                 raise ValueError(
                     "StreamingAppearanceLOD target_degree exceeds Model.sh_degree"
                 )
+            if (
+                self.streaming_appearance_lod_config["sparse_model_export"]
+                and self.max_sh_degree
+                != self.streaming_appearance_lod_config["target_degree"]
+            ):
+                raise ValueError(
+                    "TGBR sparse export requires Model.sh_degree == target_degree"
+                )
         self.streaming_appearance_lod_stats = {
             "evidence_updates": 0,
             "observed_rows": 0,
@@ -1302,7 +1852,19 @@ class GaussianModel:
             "gradient_positive_rows": 0,
             "gradient_signal_sum": 0.0,
             "gradient_signal_max": 0.0,
+            "current_target_fraction": 0.0,
         }
+        self.streaming_compute_routing_stats = {
+            "render_calls": 0,
+            "rasterization_calls": 0,
+            "packed_rows": 0,
+            "base_rows": 0,
+            "promoted_target_rows": 0,
+            "probe_rows": 0,
+            "target_rows": 0,
+            "skipped_target_band_rows": 0,
+        }
+        self.tgbr_sparse_model_stats = None
         self.frontview_sparse_scale_map_config = (
             validate_front_view_sparse_scale_map_config(
                 configs.get("FrontViewSparseScaleMap")
@@ -1373,6 +1935,10 @@ class GaussianModel:
                 )
 
         self.opacity_prune_threshold = configs["Model"]["opacity_prune_threshold"]
+        self.opacity_pruning_audit_enabled = bool(
+            configs.get("CausalDepthAudit", {}).get("audit_opacity_pruning", False)
+        )
+        self.opacity_pruning_audit_calls = []
 
         self.gaussian_type = configs["Model"]["gaussian_type"]
 
@@ -1728,14 +2294,14 @@ class GaussianModel:
             safe_y = torch.clamp(y, 0, height - 1)
             candidate_depths.append(z.detach().cpu().numpy())
             map_depths.append(
-                render_pkg["depth"][safe_y, safe_x]
+                self._geometry_depth(render_pkg)[safe_y, safe_x]
                 .reshape(-1)
                 .detach()
                 .cpu()
                 .numpy()
             )
             map_opacities.append(
-                render_pkg["opacity"][safe_y, safe_x]
+                self._geometry_opacity(render_pkg)[safe_y, safe_x]
                 .reshape(-1)
                 .detach()
                 .cpu()
@@ -1924,6 +2490,54 @@ class GaussianModel:
         else:
             raise ValueError("level should be in range [-1, MAX_LEVEL)")
 
+    def get_metric_confidences(self, level=-1):
+        levels = range(self.MAX_LEVEL) if level == -1 else (level,)
+        values = [
+            self.gaussian_groups[group_id].non_trainable_params[
+                "metric_confidences"
+            ]
+            for gaussian_level in levels
+            for group_id in self.active_gaussian_groups[gaussian_level]
+        ]
+        if not values:
+            return torch.empty(0, device=self.device, dtype=torch.float32)
+        return torch.cat(values, dim=0)
+
+    def get_uncertainty_confidences(self, level=-1):
+        levels = range(self.MAX_LEVEL) if level == -1 else (level,)
+        values = [
+            self.gaussian_groups[group_id].non_trainable_params[
+                "uncertainty_confidences"
+            ]
+            for gaussian_level in levels
+            for group_id in self.active_gaussian_groups[gaussian_level]
+        ]
+        if not values:
+            return torch.empty(0, device=self.device, dtype=torch.float32)
+        return torch.cat(values, dim=0)
+
+    def _geometry_depth(self, render_pkg):
+        if (
+            self.causal_dual_responsibility_config["enabled"]
+            and self.causal_dual_responsibility_config[
+                "geometry_use_metric_depth"
+            ]
+            and "metric_depth" in render_pkg
+        ):
+            return render_pkg["metric_depth"]
+        return render_pkg["depth"]
+
+    def _geometry_opacity(self, render_pkg):
+        if (
+            self.causal_dual_responsibility_config["enabled"]
+            and self.causal_dual_responsibility_config[
+                "geometry_use_metric_depth"
+            ]
+            and "metric_opacity" in render_pkg
+        ):
+            return render_pkg["metric_opacity"]
+        return render_pkg["opacity"]
+
         # return torch.cat([self.gaussian_groups[i].get_features for i in self.active_gaussian_groups], dim=0)
 
     def get_num_active_groups(self, level):
@@ -2017,30 +2631,138 @@ class GaussianModel:
 
         rasterize_mode = "antialiased" if self.use_anti_aliasing else "classic"
 
-        render_colors, render_alphas, projection_info = rasterization(
-            means=means,
-            quats=rotations,
-            scales=scales,
-            opacities=opacities,
-            colors=shs,
-            viewmats=cam.get_pose()[
-                None, :, :
-            ],  # we don't need to inverse the matrix here because the pose is already world2cam
-            Ks=cam.get_int_mat(level)[None, ...],  # [1, 3, 3]
-            width=cam.get_width(level),
-            height=cam.get_height(level),
-            rasterize_mode=rasterize_mode,
-            near_plane=cam.near,
-            far_plane=cam.far,
-            radius_clip=self.radius_clip,
-            render_mode=self.render_mode,
-            sh_degree=self.active_sh_degree,
-        )
+        route_degrees = self._streaming_appearance_render_degrees(level)
+        routed_existing_rows = route_degrees is not None
+        metric_confidences = None
+        uncertainty_confidences = None
+        appearance_confidences = None
+        if self.causal_dual_responsibility_config["enabled"]:
+            metric_confidences = self.get_metric_confidences()
+            uncertainty_confidences = self.get_uncertainty_confidences()
+            if external_splats is not None:
+                metric_confidences = torch.cat(
+                    (
+                        metric_confidences,
+                        torch.ones(
+                            len(external_splats["means"]),
+                            device=means.device,
+                            dtype=means.dtype,
+                        ),
+                    )
+                )
+                uncertainty_confidences = torch.cat(
+                    (
+                        uncertainty_confidences,
+                        torch.ones(
+                            len(external_splats["means"]),
+                            device=means.device,
+                            dtype=means.dtype,
+                        ),
+                    )
+                )
+            if (
+                level == 0
+                and self.causal_dual_responsibility_config[
+                    "finite_depth_certificate_enabled"
+                ]
+                and self.causal_dual_responsibility_config[
+                    "finite_depth_preserve_appearance_ownership"
+                ]
+            ):
+                appearance_confidences = uncertainty_confidences
+            if route_degrees is None:
+                route_degrees = torch.full(
+                    (len(means),),
+                    int(self.active_sh_degree),
+                    device=means.device,
+                    dtype=torch.uint8,
+                )
+            elif external_splats is not None and routed_existing_rows:
+                route_degrees = torch.cat(
+                    (
+                        route_degrees,
+                        torch.full(
+                            (len(external_splats["means"]),),
+                            int(self.active_sh_degree),
+                            device=means.device,
+                            dtype=torch.uint8,
+                        ),
+                    )
+                )
+        if route_degrees is not None and (
+            external_splats is None
+            or self.causal_dual_responsibility_config["enabled"]
+        ):
+            render_colors, render_alphas, projection_info = (
+                heterogeneous_sh_rasterization(
+                    means=means,
+                    quats=rotations,
+                    scales=scales,
+                    opacities=opacities,
+                    sh_coefficients=shs,
+                    sh_degrees=route_degrees,
+                    metric_confidences=metric_confidences,
+                    appearance_confidences=appearance_confidences,
+                    uncertainty_confidences=uncertainty_confidences,
+                    uncertainty_cell_px=(
+                        self.frontview_directional_layer.uncertainty_cell_px_for_camera(
+                            cam
+                        )
+                    ),
+                    viewmats=cam.get_pose()[None, :, :],
+                    Ks=cam.get_int_mat(level)[None, ...],
+                    width=cam.get_width(level),
+                    height=cam.get_height(level),
+                    rasterize_mode=rasterize_mode,
+                    near_plane=cam.near,
+                    far_plane=cam.far,
+                    radius_clip=self.radius_clip,
+                    render_mode=self.render_mode,
+                    base_degree=self.streaming_appearance_lod_config[
+                        "birth_degree"
+                    ],
+                    target_degree=self.streaming_appearance_lod_config[
+                        "target_degree"
+                    ],
+                )
+            )
+            self._record_streaming_compute_routing(projection_info)
+        else:
+            render_colors, render_alphas, projection_info = rasterization(
+                means=means,
+                quats=rotations,
+                scales=scales,
+                opacities=opacities,
+                colors=shs,
+                viewmats=cam.get_pose()[
+                    None, :, :
+                ],  # pose is already world2cam
+                Ks=cam.get_int_mat(level)[None, ...],
+                width=cam.get_width(level),
+                height=cam.get_height(level),
+                rasterize_mode=rasterize_mode,
+                near_plane=cam.near,
+                far_plane=cam.far,
+                radius_clip=self.radius_clip,
+                render_mode=self.render_mode,
+                sh_degree=self.active_sh_degree,
+            )
 
         assert render_colors.shape[0] == 1, "batch size should be 1"
 
         colors = render_colors[0]
-        if colors.shape[2] == 4:
+        metric_depths = None
+        if self.causal_dual_responsibility_config["enabled"]:
+            if colors.shape[2] != 5:
+                raise RuntimeError(
+                    "Dual responsibility requires RGB, full depth, and metric depth"
+                )
+            colors, depths, metric_depths = (
+                colors[..., 0:3],
+                colors[..., 3:4],
+                colors[..., 4:5],
+            )
+        elif colors.shape[2] == 4:
             colors, depths = colors[..., 0:3], colors[..., 3:4]
         elif colors.shape[2] == 3:
             depths = None
@@ -2052,22 +2774,107 @@ class GaussianModel:
             colors = colors * vig_img[0]
 
         render_alphas = render_alphas[0]
+        metric_opacity = None
+        appearance_depth = None
+        appearance_opacity = None
+        uncertainty_opacity = None
+        if self.causal_dual_responsibility_config["enabled"]:
+            metric_opacity = projection_info["metric_depth_mass"][0]
+            metric_depths = torch.where(
+                metric_opacity
+                >= float(
+                    self.causal_dual_responsibility_config[
+                        "minimum_metric_opacity"
+                    ]
+                ),
+                metric_depths,
+                torch.zeros_like(metric_depths),
+            )
+            self.causal_dual_responsibility_stats[
+                "metric_depth_render_calls"
+            ] += 1
+            uncertainty_opacity = projection_info.get("uncertainty_mass")
+            if uncertainty_opacity is not None:
+                uncertainty_opacity = uncertainty_opacity[0]
+            appearance_depth = projection_info.get("appearance_depth")
+            appearance_opacity = projection_info.get("appearance_depth_mass")
+            if appearance_depth is not None and appearance_opacity is not None:
+                appearance_depth = appearance_depth[0]
+                appearance_opacity = appearance_opacity[0]
+                appearance_depth = torch.where(
+                    appearance_opacity
+                    >= float(
+                        self.causal_dual_responsibility_config[
+                            "minimum_metric_opacity"
+                        ]
+                    ),
+                    appearance_depth,
+                    torch.zeros_like(appearance_depth),
+                )
 
         colors = colors * cam.exposure_gain / self.scene_exposure_gain
+        geometry_colors = colors
         if level == 0:
-            colors = self.frontview_directional_layer.composite(
-                cam, colors, depths, render_alphas
+            geometry_directional_depth = (
+                metric_depths
+                if self.causal_dual_responsibility_config["enabled"]
+                and self.causal_dual_responsibility_config[
+                    "directional_use_metric_depth"
+                ]
+                else depths
             )
+            preserve_appearance = (
+                self.causal_dual_responsibility_config["enabled"]
+                and self.causal_dual_responsibility_config[
+                    "finite_depth_certificate_enabled"
+                ]
+                and self.causal_dual_responsibility_config[
+                    "finite_depth_preserve_appearance_ownership"
+                ]
+            )
+            directional_depth = (
+                appearance_depth
+                if preserve_appearance and appearance_depth is not None
+                else geometry_directional_depth
+            )
+            if metric_opacity is None:
+                colors = self.frontview_directional_layer.composite(
+                    cam, colors, directional_depth, render_alphas
+                )
+            else:
+                directional_metric_opacity = (
+                    appearance_opacity
+                    if preserve_appearance and appearance_opacity is not None
+                    else metric_opacity
+                )
+                colors = self.frontview_directional_layer.composite(
+                    cam,
+                    colors,
+                    directional_depth,
+                    render_alphas,
+                    metric_opacity=directional_metric_opacity,
+                    uncertainty_opacity=uncertainty_opacity,
+                )
 
         if depths is not None:
             render_pkg = {
                 "render": colors,
+                "geometry_render": geometry_colors,
                 "depth": depths,
                 "opacity": render_alphas,
             }
+            if metric_opacity is not None:
+                render_pkg["metric_opacity"] = metric_opacity
+                render_pkg["metric_depth"] = metric_depths
+            if uncertainty_opacity is not None:
+                render_pkg["uncertainty_mass"] = uncertainty_opacity
+            if appearance_opacity is not None:
+                render_pkg["appearance_metric_depth"] = appearance_depth
+                render_pkg["appearance_metric_opacity"] = appearance_opacity
         else:
             render_pkg = {
                 "render": colors,
+                "geometry_render": geometry_colors,
                 "opacity": render_alphas,
             }
         if return_info:
@@ -2234,6 +3041,8 @@ class GaussianModel:
         detach_gaussians=False,
         level=0,
         external_splats=None,
+        appearance_probe=False,
+        appearance_sh_degree_override=None,
     ):
         means = []
         scales = []
@@ -2285,23 +3094,65 @@ class GaussianModel:
         poses = torch.stack([cam.get_pose() for cam in cams], dim=0)
         Ks = torch.stack([cam.get_int_mat(level) for cam in cams], dim=0)
 
-        render_colors, render_alphas, projection_info = rasterization(
-            means=means,
-            quats=rotations,
-            scales=scales,
-            opacities=opacities,
-            colors=shs,
-            viewmats=poses,  # we don't need to inverse the matrix here because the pose is already world2cam
-            Ks=Ks,  # [N, 3, 3]
-            width=cams[0].get_width(level),
-            height=cams[0].get_height(level),
-            rasterize_mode=rasterize_mode,
-            near_plane=cams[0].near,
-            far_plane=cams[0].far,
-            radius_clip=self.radius_clip,
-            render_mode=self.render_mode,
-            sh_degree=self.active_sh_degree,
-        )
+        if appearance_sh_degree_override is not None:
+            appearance_sh_degree_override = int(appearance_sh_degree_override)
+            if not 0 <= appearance_sh_degree_override <= self.active_sh_degree:
+                raise ValueError("Appearance SH override exceeds the active degree")
+        route_degrees = self._streaming_appearance_render_degrees(level)
+        if (
+            appearance_sh_degree_override is None
+            and route_degrees is not None
+            and external_splats is None
+        ):
+            render_colors, render_alphas, projection_info = (
+                heterogeneous_sh_rasterization(
+                    means=means,
+                    quats=rotations,
+                    scales=scales,
+                    opacities=opacities,
+                    sh_coefficients=shs,
+                    sh_degrees=route_degrees,
+                    viewmats=poses,
+                    Ks=Ks,
+                    width=cams[0].get_width(level),
+                    height=cams[0].get_height(level),
+                    rasterize_mode=rasterize_mode,
+                    near_plane=cams[0].near,
+                    far_plane=cams[0].far,
+                    radius_clip=self.radius_clip,
+                    render_mode=self.render_mode,
+                    base_degree=self.streaming_appearance_lod_config[
+                        "birth_degree"
+                    ],
+                    target_degree=self.streaming_appearance_lod_config[
+                        "target_degree"
+                    ],
+                    probe_inactive=bool(appearance_probe),
+                )
+            )
+            self._record_streaming_compute_routing(projection_info)
+        else:
+            render_colors, render_alphas, projection_info = rasterization(
+                means=means,
+                quats=rotations,
+                scales=scales,
+                opacities=opacities,
+                colors=shs,
+                viewmats=poses,  # pose is already world2cam
+                Ks=Ks,
+                width=cams[0].get_width(level),
+                height=cams[0].get_height(level),
+                rasterize_mode=rasterize_mode,
+                near_plane=cams[0].near,
+                far_plane=cams[0].far,
+                radius_clip=self.radius_clip,
+                render_mode=self.render_mode,
+                sh_degree=(
+                    self.active_sh_degree
+                    if appearance_sh_degree_override is None
+                    else appearance_sh_degree_override
+                ),
+            )
 
         colors = render_colors
         if colors.shape[3] == 4:
@@ -2467,9 +3318,18 @@ class GaussianModel:
         return render_pkg
 
     def render_batch(
-        self, cams, random_bg=False, detach_gaussians=False, level=0, external_splats=None
+        self,
+        cams,
+        random_bg=False,
+        detach_gaussians=False,
+        level=0,
+        external_splats=None,
+        appearance_probe=False,
+        appearance_sh_degree_override=None,
     ):
         if self.gaussian_type == "2dgs":
+            if appearance_sh_degree_override is not None:
+                raise ValueError("Appearance SH override requires 3DGS")
             return self.render_batch_2dgs(
                 cams,
                 random_bg=random_bg,
@@ -2484,9 +3344,53 @@ class GaussianModel:
                 detach_gaussians=detach_gaussians,
                 level=level,
                 external_splats=external_splats,
+                appearance_probe=appearance_probe,
+                appearance_sh_degree_override=appearance_sh_degree_override,
             )
         else:
             raise NotImplementedError
+
+    def _streaming_appearance_render_degrees(self, level):
+        config = self.streaming_appearance_lod_config
+        if not (
+            config["enabled"]
+            and config["compute_routing"]
+            and self.gaussian_type == "3dgs"
+            and self.active_sh_degree == config["target_degree"]
+            and self.streaming_appearance_lod_stats["evidence_updates"]
+            >= config["compute_routing_warmup_evidence_updates"]
+        ):
+            return None
+        if config["birth_degree"] != 2 or config["target_degree"] != 3:
+            raise ValueError("Compute-routed TGBR currently supports SH2 -> SH3")
+        degrees = [
+            self.gaussian_groups[group_id].non_trainable_params[
+                "appearance_sh_degree"
+            ]
+            for gaussian_level in range(self.MAX_LEVEL)
+            for group_id in self.active_gaussian_groups[gaussian_level]
+        ]
+        if not degrees:
+            return torch.empty(0, device=self.device, dtype=torch.uint8)
+        return torch.cat(degrees, dim=0)
+
+    @torch.no_grad()
+    def _record_streaming_compute_routing(self, projection_info):
+        route = projection_info.get("heterogeneous_sh")
+        if route is None:
+            return
+        stats = self.streaming_compute_routing_stats
+        stats["render_calls"] += 1
+        stats["rasterization_calls"] += 1
+        for key in (
+            "packed_rows",
+            "base_rows",
+            "promoted_target_rows",
+            "probe_rows",
+            "target_rows",
+            "skipped_target_band_rows",
+        ):
+            stats[key] = stats[key] + route[key]
 
     def _managed_active_group_ids(self):
         """Return active groups owned by their local optimizer exactly once."""
@@ -2712,6 +3616,11 @@ class GaussianModel:
         decay = float(config["utility_ema_decay"])
         if gradient_mode:
             band_width = (band_end - band_begin) * 3
+            gradient_ema_dtype = (
+                torch.float16
+                if config["gradient_ema_dtype"] == "float16"
+                else torch.float32
+            )
             for _, group, _, _ in records:
                 if "appearance_band_gradient_ema" not in group.non_trainable_params:
                     group.non_trainable_params[
@@ -2719,7 +3628,7 @@ class GaussianModel:
                     ] = torch.zeros(
                         (group.get_num, band_width),
                         device=self.device,
-                        dtype=torch.float32,
+                        dtype=gradient_ema_dtype,
                     )
         for _, group, begin, end in records:
             selected = (unique_ids >= begin) & (unique_ids < end)
@@ -2754,10 +3663,13 @@ class GaussianModel:
                 )
                 if gradient_ema.shape[1] != signal_vector.shape[1]:
                     raise RuntimeError("Streaming SH gradient band width changed")
+                scaled_signal_vector = signal_vector * float(
+                    config["gradient_ema_scale"]
+                )
                 gradient_ema[local_ids] = (
                     decay * gradient_ema[local_ids]
-                    + (1.0 - decay) * signal_vector
-                )
+                    + (1.0 - decay) * scaled_signal_vector
+                ).to(dtype=gradient_ema.dtype)
                 group.non_trainable_params["appearance_view_count"].index_add_(
                     0,
                     local_ids,
@@ -2866,6 +3778,12 @@ class GaussianModel:
                 cursor += count
             stats["promotion_updates"] += 1
             stats["promoted_rows"] += int(selected.numel())
+            stats["current_target_fraction"] = (
+                float((degrees >= int(config["target_degree"])).sum().item())
+                / float(degrees.numel())
+                if degrees.numel()
+                else 0.0
+            )
         return observed_rows
 
     def _mask_streaming_appearance_tensor(self, group, tensor):
@@ -2895,6 +3813,50 @@ class GaussianModel:
                 gradient = group.splats["shN"].grad
                 if gradient is not None:
                     self._mask_streaming_appearance_tensor(group, gradient)
+
+    @torch.no_grad()
+    def streaming_high_band_gradient_ratio(self):
+        """Return per-coefficient target-band energy over lower-band energy."""
+
+        config = self.streaming_appearance_lod_config
+        if not config["enabled"]:
+            return float("nan")
+        band_begin, band_end = sh_band_bounds(config["target_degree"])
+        lower_band_energy = torch.zeros((), device=self.device, dtype=torch.float64)
+        high_band_energy = torch.zeros((), device=self.device, dtype=torch.float64)
+        lower_band_values = 0
+        high_band_values = 0
+        observed = False
+        for _, group, _, _ in self._streaming_appearance_group_records():
+            gradient = group.splats["shN"].grad
+            if gradient is None:
+                continue
+            observed = True
+            gradient = gradient.detach()
+            if gradient.shape[1] >= band_end:
+                lower = gradient[:, :band_begin]
+                lower_norm = torch.linalg.vector_norm(lower.float()).double()
+                lower_band_energy.add_(lower_norm.square())
+                lower_band_values += int(lower.numel())
+                high = gradient[:, band_begin:band_end]
+                high_norm = torch.linalg.vector_norm(
+                    high.float()
+                ).double()
+                high_band_energy.add_(high_norm.square())
+                high_band_values += int(high.numel())
+        if not observed:
+            return float("nan")
+        if lower_band_values <= 0 or high_band_values <= 0:
+            return float("nan")
+        lower_mean_energy = float(lower_band_energy.item()) / float(
+            lower_band_values
+        )
+        high_mean_energy = float(high_band_energy.item()) / float(high_band_values)
+        if high_mean_energy <= 0.0:
+            return 0.0
+        if lower_mean_energy <= 0.0:
+            return float("inf")
+        return max(0.0, high_mean_energy / lower_mean_energy)
 
     @torch.no_grad()
     def constrain_sh_degree_masks(self):
@@ -2935,27 +3897,98 @@ class GaussianModel:
         denominator = len(managed_group_ids) + len(self.progressive_group_ids)
         return avg_pos_lr / max(1, denominator)
 
-    def update(self):
-        for i in self._managed_active_group_ids():
-            if self.gaussian_groups[i].is_optimize:
-                self.gaussian_groups[i].update()
+    def update(
+        self,
+        replay_steps=0,
+        gradient_decay=1.0,
+        learning_rate_scale=1.0,
+    ):
+        replay_steps = int(replay_steps)
+        gradient_decay = float(gradient_decay)
+        if replay_steps < 0:
+            raise ValueError("Optimizer replay steps must be non-negative")
+        if not math.isfinite(gradient_decay) or not 0.0 <= gradient_decay <= 1.0:
+            raise ValueError("Optimizer replay gradient decay must be in [0, 1]")
+        learning_rate_scale = float(learning_rate_scale)
+        if not math.isfinite(learning_rate_scale) or learning_rate_scale <= 0.0:
+            raise ValueError("Optimizer learning-rate scale must be finite and positive")
+
+        active_groups = [
+            self.gaussian_groups[index]
+            for index in self._managed_active_group_ids()
+            if self.gaussian_groups[index].is_optimize
+        ]
+        learning_rates = []
+        if learning_rate_scale != 1.0:
+            for group in active_groups:
+                for optimizer in group.optimizers.values():
+                    for parameter_group in optimizer.param_groups:
+                        learning_rates.append(
+                            (parameter_group, float(parameter_group["lr"]))
+                        )
+                        parameter_group["lr"] *= learning_rate_scale
+        total_steps = replay_steps + 1
+        post_step_records = self._frontview_post_step_projection
+        try:
+            for replay_index in range(total_steps):
+                for group in active_groups:
+                    record = post_step_records.get(id(group))
+                    previous_means = (
+                        group.splats["means"][record[0]].detach().clone()
+                        if record is not None
+                        else None
+                    )
+                    group.optimizer_step()
+                    if record is not None:
+                        indices, reference_rays, radial_scales = record
+                        with torch.no_grad():
+                            group.splats["means"][indices] = project_raywise_update(
+                                previous_means,
+                                group.splats["means"][indices],
+                                reference_rays,
+                                radial_scales,
+                            )
+                        group.constrain_mean_displacement()
+                        stats = self.frontview_observability_stats
+                        stats["post_step_projection_calls"] += 1
+                        stats["post_step_projected_rows"] += int(indices.numel())
+                for optimizer in self.progressive_optimizers.values():
+                    optimizer.step()
+                self.constrain_sh_degree_masks()
+                if replay_index + 1 < total_steps:
+                    for group in active_groups:
+                        group.scale_optimizer_gradients(gradient_decay)
+                    for optimizer in self.progressive_optimizers.values():
+                        for parameter_group in optimizer.param_groups:
+                            for parameter in parameter_group["params"]:
+                                if parameter.grad is not None:
+                                    parameter.grad.mul_(gradient_decay)
+        finally:
+            self._frontview_post_step_projection = {}
+            for parameter_group, learning_rate in learning_rates:
+                parameter_group["lr"] = learning_rate
+
+        for group in active_groups:
+            group.zero_optimizer_gradients()
         for optimizer in self.progressive_optimizers.values():
-            optimizer.step()
             optimizer.zero_grad(set_to_none=True)
-        self.constrain_sh_degree_masks()
 
     @torch.no_grad()
     def precondition_frontview_mean_gradients(
         self, cameras, config, update_evidence=True
     ):
-        """Apply batched causal parallax control to uncertain DepthCov means."""
+        """Update causal evidence and control the weak birth-ray gauge."""
 
         if not bool(config.get("enabled", False)) or not cameras:
+            self._frontview_post_step_projection = {}
             return None
         records = []
         anchors = []
         reference_rays = []
         information = []
+        gaussian_scales = []
+        reference_ranges = []
+        birth_log_depth_stds = []
         gradients = []
         for group_id in self._managed_active_group_ids():
             group = self.gaussian_groups[group_id]
@@ -2972,15 +4005,30 @@ class GaussianModel:
             reference_rays.append(
                 group.non_trainable_params["reference_rays"][indices]
             )
+            reference_ranges.append(
+                torch.linalg.vector_norm(
+                    group.non_trainable_params["mean_anchors"][indices]
+                    - group.non_trainable_params["reference_camera_centers"][indices],
+                    dim=1,
+                )
+            )
+            gaussian_scales.append(group.get_scaling[indices])
             information.append(
                 group.non_trainable_params["max_parallax_sin2"][indices]
             )
+            birth_log_depth_stds.append(
+                group.non_trainable_params["birth_log_depth_stds"][indices]
+            )
             gradients.append(gradient[indices])
         if not records:
+            self._frontview_post_step_projection = {}
             return None
 
         reference_rays = torch.cat(reference_rays, dim=0)
         max_parallax_sin2 = torch.cat(information, dim=0)
+        gaussian_scales = torch.cat(gaussian_scales, dim=0)
+        reference_ranges = torch.cat(reference_ranges, dim=0)
+        birth_log_depth_stds = torch.cat(birth_log_depth_stds, dim=0)
         gradients = torch.cat(gradients, dim=0)
         if update_evidence:
             anchors = torch.cat(anchors, dim=0)
@@ -3020,11 +4068,25 @@ class GaussianModel:
                     ),
                 )
 
-        radial_scales = parallax_learning_scale(
-            max_parallax_sin2,
-            float(config["min_ray_lr_scale"]),
-            float(config["unlock_parallax_deg"]),
-        )
+        if config.get("learning_scale_mode") == "posterior_information":
+            radial_scales = posterior_information_scale(
+                max_parallax_sin2,
+                gaussian_scales,
+                reference_ranges,
+                birth_log_depth_stds,
+            )
+        elif config.get("learning_scale_mode") == "resolution_information":
+            radial_scales = resolution_information_scale(
+                max_parallax_sin2,
+                gaussian_scales,
+                reference_ranges,
+            )
+        else:
+            radial_scales = parallax_learning_scale(
+                max_parallax_sin2,
+                float(config["min_ray_lr_scale"]),
+                float(config["unlock_parallax_deg"]),
+            )
         if bool(config.get("shuffle_evidence", False)) and radial_scales.numel() > 1:
             generator = torch.Generator(device=radial_scales.device)
             generator.manual_seed(
@@ -3038,23 +4100,44 @@ class GaussianModel:
                     device=radial_scales.device,
                 )
             ]
-        adjusted = precondition_raywise_gradient(
-            gradients, reference_rays, radial_scales
+        optimization_mode = config.get(
+            "optimization_mode", "gradient_preconditioner"
         )
+        adjusted = None
+        if optimization_mode == "gradient_preconditioner":
+            adjusted = precondition_raywise_gradient(
+                gradients, reference_rays, radial_scales
+            )
 
         cursor = 0
+        post_step_records = {}
         for group, indices, count in records:
             end = cursor + count
             group.non_trainable_params["max_parallax_sin2"][indices] = (
                 max_parallax_sin2[cursor:end]
             )
-            group.splats["means"].grad[indices] = adjusted[cursor:end]
+            if optimization_mode == "gradient_preconditioner":
+                group.splats["means"].grad[indices] = adjusted[cursor:end]
+            else:
+                post_step_records[id(group)] = (
+                    indices,
+                    reference_rays[cursor:end],
+                    radial_scales[cursor:end],
+                )
             cursor = end
+        self._frontview_post_step_projection = post_step_records
 
         rows = int(radial_scales.numel())
         mean_scale = float(radial_scales.mean().item())
         unlocked_fraction = float((radial_scales >= 0.999).float().mean().item())
         stats = self.frontview_observability_stats
+        stats["learning_scale_mode"] = config.get(
+            "learning_scale_mode", "fixed_angle"
+        )
+        stats["optimization_mode"] = optimization_mode
+        stats["responsibility_scope"] = config.get(
+            "responsibility_scope", "all_depthcov"
+        )
         stats["calls"] += 1
         stats["rows"] += rows
         stats["radial_scale_sum"] += mean_scale * rows
@@ -3067,6 +4150,168 @@ class GaussianModel:
             "mean_radial_scale": mean_scale,
             "unlocked_fraction": unlocked_fraction,
         }
+
+    @torch.no_grad()
+    def update_dynamic_footprint_trust(self, cameras):
+        """Release only certificate-owned scale caps as evidence accumulates."""
+
+        config = self.frontview_far_field_config
+        if not bool(config.get("footprint_trust_dynamic_update", False)) or not cameras:
+            return 0
+
+        records = []
+        anchors = []
+        reference_centers = []
+        reference_rays = []
+        max_parallax = []
+        target_scales = []
+        log_depth_stds = []
+        evidence_pending = []
+        ownership = []
+        for group_id in self._managed_active_group_ids():
+            group = self.gaussian_groups[group_id]
+            params = group.non_trainable_params
+            certificate_rows = torch.isfinite(params["footprint_target_scales"])
+            indices = torch.nonzero(certificate_rows, as_tuple=False).flatten()
+            if indices.numel() == 0:
+                continue
+            records.append((group, indices, int(indices.numel())))
+            anchors.append(params["mean_anchors"][indices])
+            reference_centers.append(params["reference_camera_centers"][indices])
+            reference_rays.append(params["reference_rays"][indices])
+            max_parallax.append(params["max_parallax_sin2"][indices])
+            target_scales.append(params["footprint_target_scales"][indices])
+            log_depth_stds.append(params["birth_log_depth_stds"][indices])
+            evidence_pending.append(
+                params["footprint_evidence_pending_mask"][indices]
+            )
+            ownership.append(params["footprint_trust_mask"][indices])
+        if not records:
+            return 0
+
+        anchors = torch.cat(anchors, dim=0)
+        reference_centers = torch.cat(reference_centers, dim=0)
+        reference_rays = torch.cat(reference_rays, dim=0)
+        max_parallax_sin2 = torch.cat(max_parallax, dim=0)
+        target_scales = torch.cat(target_scales, dim=0)
+        birth_log_depth_stds = torch.cat(log_depth_stds, dim=0)
+        evidence_pending = torch.cat(evidence_pending, dim=0)
+        ownership = torch.cat(ownership, dim=0)
+        margin = float(config.get("visibility_margin_px", 16.0))
+        for camera in cameras:
+            pose = camera.get_pose().detach().to(
+                device=anchors.device, dtype=anchors.dtype
+            )
+            intrinsics = camera.get_int_mat(0).detach().to(
+                device=anchors.device, dtype=anchors.dtype
+            )
+            rotation = pose[:3, :3]
+            translation = pose[:3, 3]
+            camera_points = anchors @ rotation.T + translation
+            depth = camera_points[:, 2]
+            projected = camera_points @ intrinsics.T
+            u = projected[:, 0] / torch.clamp(depth, min=1.0e-8)
+            v = projected[:, 1] / torch.clamp(depth, min=1.0e-8)
+            visible = (
+                (depth > float(camera.near))
+                & (depth < float(camera.far))
+                & (u >= -margin)
+                & (u < float(camera.get_width(0)) + margin)
+                & (v >= -margin)
+                & (v < float(camera.get_height(0)) + margin)
+            )
+            camera_center = -(rotation.T @ translation)
+            current_rays = torch.nn.functional.normalize(
+                anchors - camera_center.reshape(1, 3), dim=1, eps=1.0e-8
+            )
+            cosine = torch.sum(reference_rays * current_rays, dim=1)
+            observed = torch.clamp(1.0 - cosine.square(), 0.0, 1.0)
+            max_parallax_sin2 = torch.maximum(
+                max_parallax_sin2,
+                torch.where(visible, observed, torch.zeros_like(observed)),
+            )
+
+        reference_ranges = torch.linalg.vector_norm(
+            anchors - reference_centers, dim=1
+        )
+        release_evidence = max_parallax_sin2
+        shuffled = bool(config.get("footprint_trust_dynamic_shuffle", False))
+        shuffle_mode = config.get(
+            "footprint_trust_dynamic_shuffle_mode", "evidence"
+        )
+        stats = self.frontview_far_field_stats
+        shuffle_seed = int(config.get("shuffle_seed", 42)) + int(
+            stats["footprint_trust_dynamic_calls"]
+        )
+        if shuffled and shuffle_mode == "evidence" and release_evidence.numel() > 1:
+            release_evidence = shuffle_within_log_depth_regimes(
+                release_evidence,
+                reference_ranges,
+                shuffle_seed,
+            )
+        newly_resolved = evidence_pending & resolved_footprint_mask(
+            max_parallax_sin2,
+            target_scales,
+            reference_ranges,
+            birth_log_depth_stds,
+        )
+        if shuffled and shuffle_mode == "certificate" and newly_resolved.numel() > 1:
+            released = matched_events_within_log_depth_regimes(
+                newly_resolved,
+                ownership,
+                reference_ranges,
+                shuffle_seed,
+            )
+        else:
+            released = resolved_footprint_mask(
+                release_evidence,
+                target_scales,
+                reference_ranges,
+                birth_log_depth_stds,
+            )
+
+        cursor = 0
+        released_rows = 0
+        for group, indices, count in records:
+            end = cursor + count
+            group.non_trainable_params["max_parallax_sin2"][indices] = (
+                max_parallax_sin2[cursor:end]
+            )
+            group.non_trainable_params["footprint_evidence_pending_mask"][
+                indices[newly_resolved[cursor:end]]
+            ] = False
+            local_release = released[cursor:end]
+            if torch.any(local_release):
+                current_limits = group.non_trainable_params[
+                    "max_scale_expansions"
+                ][indices]
+                release_limits = group.non_trainable_params[
+                    "footprint_release_scale_expansions"
+                ][indices]
+                updated_limits, updated_ownership = release_owned_scale_caps(
+                    current_limits,
+                    release_limits,
+                    ownership[cursor:end],
+                    local_release,
+                )
+                group.non_trainable_params["max_scale_expansions"][indices] = (
+                    updated_limits
+                )
+                group.non_trainable_params["footprint_trust_mask"][indices] = (
+                    updated_ownership
+                )
+                released_rows += int(
+                    torch.count_nonzero(
+                        ownership[cursor:end] & local_release
+                    ).item()
+                )
+            cursor = end
+
+        stats["footprint_trust_dynamic_calls"] += 1
+        stats["footprint_trust_dynamic_rows"] += int(released.numel())
+        stats["footprint_trust_dynamic_released_rows"] += released_rows
+        stats["footprint_trust_dynamic_shuffled_calls"] += int(shuffled)
+        return released_rows
 
     def frontview_observability_summary(self):
         stats = dict(self.frontview_observability_stats)
@@ -3184,11 +4429,153 @@ class GaussianModel:
         )
         return scores, valid_any, support_density
 
+    @torch.no_grad()
+    def _frontview_recovery_multiview_depths(
+        self,
+        camera,
+        reference_cameras,
+        pixels,
+        fallback_depths,
+        depth_confidence,
+        far_depth_m,
+        level,
+    ):
+        """Select one causal inverse-depth hypothesis for each fallback ray."""
+
+        config = self.frontview_coverage_recovery_config
+        rows = int(pixels.shape[0])
+        if rows == 0 or not reference_cameras:
+            return fallback_depths, torch.zeros_like(fallback_depths), 0
+        hypotheses_np = self.frontview_coverage_depth_prior.hypotheses(
+            int(camera.cam_idx),
+            int(config["multiview_depth_hypotheses"]),
+            far_depth_m=far_depth_m,
+        )
+        if len(hypotheses_np) == 0:
+            return fallback_depths, torch.zeros_like(fallback_depths), 0
+        hypotheses = torch.as_tensor(
+            hypotheses_np, device=pixels.device, dtype=fallback_depths.dtype
+        )
+        hypothesis_count = int(hypotheses.numel())
+        tiled_pixels = pixels.repeat(hypothesis_count, 1)
+        tiled_depths = hypotheses.reshape(-1, 1).expand(-1, rows).reshape(-1)
+        tiled_confidence = depth_confidence.repeat(hypothesis_count)
+        _, valid, support_density = self._frontview_reprojection_scores(
+            camera,
+            reference_cameras,
+            tiled_pixels,
+            tiled_depths,
+            tiled_confidence,
+            level,
+        )
+        scores = support_density.reshape(hypothesis_count, rows)
+        valid = valid.reshape(hypothesis_count, rows)
+        if config["multiview_depth_mode"] == "posterior_inverse_depth":
+            scores = torch.clamp(
+                scores
+                / torch.clamp(
+                    depth_confidence.reshape(1, rows),
+                    min=torch.finfo(scores.dtype).eps,
+                ),
+                0.0,
+                1.0,
+            )
+        supported = valid.any(dim=0)
+        if config["multiview_depth_mode"] == "posterior_inverse_depth":
+            selected, evidence, supported = posterior_inverse_depth_fusion(
+                scores,
+                valid,
+                hypotheses,
+                fallback_depths,
+            )
+        else:
+            evidence, best_indices = torch.max(scores, dim=0)
+            selected = hypotheses[best_indices]
+        if bool(config["shuffle_multiview_depth"]) and bool(supported.any().item()):
+            supported_rows = torch.nonzero(supported, as_tuple=False).flatten()
+            generator = torch.Generator(device=pixels.device)
+            generator.manual_seed(
+                int(config["multiview_depth_seed"]) + int(camera.cam_idx)
+            )
+            permutation = torch.randperm(
+                supported_rows.numel(), generator=generator, device=pixels.device
+            )
+            selected_shuffled = selected.clone()
+            evidence_shuffled = evidence.clone()
+            selected_shuffled[supported_rows] = selected[supported_rows[permutation]]
+            evidence_shuffled[supported_rows] = evidence[supported_rows[permutation]]
+            selected = selected_shuffled
+            evidence = evidence_shuffled
+        result = torch.where(supported, selected, fallback_depths)
+        return result, torch.where(supported, evidence, 0.0), hypothesis_count
+
     def frontview_sampling_summary(self):
         stats = dict(self.frontview_sampling_stats)
         selected = int(stats["selected_rows"])
         stats["mean_selected_score"] = (
             float(stats["score_sum"]) / selected if selected else None
+        )
+        adaptive_calls = int(stats["adaptive_calls"])
+        stats["mean_adaptive_iterations"] = (
+            float(stats["adaptive_iterations"]) / adaptive_calls
+            if adaptive_calls
+            else None
+        )
+        stats["mean_adaptive_objective"] = (
+            float(stats["adaptive_objective_sum"]) / adaptive_calls
+            if adaptive_calls
+            else None
+        )
+        stats["mean_adaptive_boundaries_m"] = (
+            [
+                float(value) / adaptive_calls
+                for value in stats["adaptive_boundary_sum_m"]
+            ]
+            if adaptive_calls
+            else []
+        )
+        coverage_calls = int(stats["adaptive_coverage_calls"])
+        stats["mean_adaptive_coverage_cell_pixels"] = (
+            float(stats["adaptive_coverage_cell_pixel_sum"]) / coverage_calls
+            if coverage_calls
+            else None
+        )
+        density_calls = int(stats["rate_distortion_calls"])
+        stats["mean_rate_distortion_cell_pixels"] = (
+            float(stats["rate_distortion_cell_pixel_sum"]) / density_calls
+            if density_calls
+            else None
+        )
+        return stats
+
+    def frontview_inverse_depth_certificate_summary(self):
+        stats = dict(self.frontview_inverse_depth_certificate_stats)
+        rows = int(stats["rows"])
+        certified = int(stats["certified_rows"])
+        stats["enabled"] = bool(
+            self.frontview_inverse_depth_certificate_config["enabled"]
+        )
+        stats["uncertified_policy"] = self.frontview_inverse_depth_certificate_config[
+            "uncertified_policy"
+        ]
+        stats["mean_information_gain"] = (
+            float(stats["information_gain_sum"]) / rows if rows else None
+        )
+        stats["mean_absolute_log_depth_shift"] = (
+            float(stats["absolute_log_depth_shift_sum"]) / certified
+            if certified
+            else None
+        )
+        stats["mean_posterior_log_std"] = (
+            float(stats["posterior_log_std_sum"]) / certified
+            if certified
+            else None
+        )
+        stats["mean_valid_views"] = (
+            float(stats["valid_view_sum"]) / rows if rows else None
+        )
+        stats["mean_baseline_information"] = (
+            float(stats["baseline_information_sum"]) / rows if rows else None
         )
         return stats
 
@@ -3212,7 +4599,89 @@ class GaussianModel:
         stats["depth_fallback_enabled"] = bool(
             self.frontview_coverage_recovery_config["depth_fallback_enabled"]
         )
+        supported = int(stats["multiview_depth_supported_rows"])
+        calls = int(stats["multiview_depth_calls"])
+        stats["mean_multiview_depth_score"] = (
+            float(stats["multiview_depth_score_sum"]) / supported
+            if supported
+            else None
+        )
+        stats["mean_multiview_depth_concentration"] = (
+            float(stats["multiview_depth_concentration_sum"]) / supported
+            if supported
+            else None
+        )
+        stats["multiview_depth_mode"] = self.frontview_coverage_recovery_config[
+            "multiview_depth_mode"
+        ]
+        stats["mean_multiview_selected_depth_m"] = (
+            float(stats["multiview_depth_selected_sum_m"]) / supported
+            if supported
+            else None
+        )
+        stats["mean_multiview_hypothesis_count"] = (
+            float(stats["multiview_depth_hypotheses_sum"]) / calls
+            if calls
+            else None
+        )
         return stats
+
+    def causal_metric_birth_summary(self):
+        return self.causal_metric_birth.summary()
+
+    def observe_causal_landmarks(self, camera):
+        return self.causal_landmark_memory.observe(camera)
+
+    def causal_landmark_memory_summary(self):
+        return self.causal_landmark_memory.summary()
+
+    def causal_dual_responsibility_summary(self):
+        result = dict(self.causal_dual_responsibility_stats)
+        total = (
+            int(result["metric_rows"])
+            + int(result["proxy_rows"])
+            + int(result["partial_metric_rows"])
+        )
+        result.update(
+            enabled=bool(self.causal_dual_responsibility_config["enabled"]),
+            finite_depth_certificate_enabled=bool(
+                self.causal_dual_responsibility_config[
+                    "finite_depth_certificate_enabled"
+                ]
+            ),
+            finite_depth_certificate_scope=self.causal_dual_responsibility_config[
+                "finite_depth_certificate_scope"
+            ],
+            total_classified_rows=total,
+            proxy_fraction=(
+                float(result["proxy_rows"]) / float(total) if total else 0.0
+            ),
+            mean_metric_confidence=(
+                float(result["metric_confidence_sum"]) / float(total)
+                if total
+                else 0.0
+            ),
+        )
+        certificate_rows = int(result["finite_certificate_rows"])
+        result["mean_finite_certificate"] = (
+            float(result["finite_certificate_value_sum"])
+            / float(certificate_rows)
+            if certificate_rows
+            else None
+        )
+        result["mean_finite_observability"] = (
+            float(result["finite_certificate_observability_sum"])
+            / float(certificate_rows)
+            if certificate_rows
+            else None
+        )
+        result["mean_finite_support"] = (
+            float(result["finite_certificate_support_sum"])
+            / float(certificate_rows)
+            if certificate_rows
+            else None
+        )
+        return result
 
     def frontview_birth_summary(self):
         stats = dict(self.frontview_birth_stats)
@@ -3220,10 +4689,173 @@ class GaussianModel:
         return stats
 
     def frontview_far_field_summary(self):
-        return dict(self.frontview_far_field_stats)
+        stats = dict(self.frontview_far_field_stats)
+        causal_rows = int(stats["causal_route_rows"])
+        stats["routing_mode"] = self.frontview_far_field_config["routing_mode"]
+        stats["projective_nms_mode"] = self.frontview_far_field_config[
+            "projective_nms_mode"
+        ]
+        stats["map_redundancy_gate"] = bool(
+            self.frontview_far_field_config["map_redundancy_gate"]
+        )
+        stats["map_redundancy_evidence"] = self.frontview_far_field_config[
+            "map_redundancy_evidence"
+        ]
+        stats["posterior_budget_refill"] = bool(
+            self.frontview_far_field_config["posterior_budget_refill"]
+        )
+        stats["shuffle_refill_evidence"] = bool(
+            self.frontview_far_field_config["shuffle_refill_evidence"]
+        )
+        photometric_calls = int(stats["map_gate_photometric_calls"])
+        stats["mean_map_gate_residual_scale"] = (
+            float(stats["map_gate_residual_scale_sum"]) / photometric_calls
+            if photometric_calls
+            else None
+        )
+        stats["projective_covariance_mode"] = self.frontview_far_field_config[
+            "projective_covariance_mode"
+        ]
+        stats["fallback_support_mode"] = self.frontview_far_field_config[
+            "fallback_support_mode"
+        ]
+        covariance_rows = int(stats["projective_covariance_rows"])
+        stats["mean_projective_radial_factor"] = (
+            float(stats["projective_radial_factor_sum"]) / covariance_rows
+            if covariance_rows
+            else None
+        )
+        structure_rows = int(stats["fallback_structure_rows"])
+        stats["mean_fallback_anisotropy"] = (
+            float(stats["fallback_anisotropy_sum"]) / structure_rows
+            if structure_rows
+            else None
+        )
+        information_rows = int(stats["fallback_information_rows"])
+        stats["mean_fallback_information_radius_factor"] = (
+            float(stats["fallback_information_radius_factor_sum"])
+            / information_rows
+            if information_rows
+            else None
+        )
+        stats["mean_fallback_information_density"] = (
+            float(stats["fallback_information_density_sum"])
+            / information_rows
+            if information_rows
+            else None
+        )
+        stats["mean_causal_parallax_pixels"] = (
+            float(stats["causal_parallax_pixel_sum"]) / causal_rows
+            if causal_rows
+            else None
+        )
+        stats["mean_projected_support_pixels"] = (
+            float(stats["causal_support_pixel_sum"]) / causal_rows
+            if causal_rows
+            else None
+        )
+        stats["mean_log_depth_std"] = (
+            float(stats["causal_log_depth_std_sum"]) / causal_rows
+            if causal_rows
+            else None
+        )
+        footprint_rows = int(stats["footprint_trust_rows"])
+        footprint_bounded_rows = int(stats["footprint_trust_bounded_rows"])
+        footprint_calls = int(stats["footprint_trust_calls"])
+        stats["footprint_trust_mode"] = self.frontview_far_field_config[
+            "footprint_trust_mode"
+        ]
+        stats["footprint_trust_scope"] = self.frontview_far_field_config[
+            "footprint_trust_scope"
+        ]
+        stats["footprint_trust_dynamic_shuffle_mode"] = (
+            self.frontview_far_field_config[
+                "footprint_trust_dynamic_shuffle_mode"
+            ]
+        )
+        stats["mean_footprint_trust_information"] = (
+            float(stats["footprint_trust_information_sum"]) / footprint_rows
+            if footprint_rows
+            else None
+        )
+        stats["mean_footprint_scale_limit"] = (
+            float(stats["footprint_trust_limit_sum"]) / footprint_bounded_rows
+            if footprint_bounded_rows
+            else None
+        )
+        stats["footprint_trust_bounded_fraction"] = (
+            float(footprint_bounded_rows) / footprint_rows
+            if footprint_rows
+            else None
+        )
+        stats["mean_footprint_trust_cell_pixels"] = (
+            float(stats["footprint_trust_cell_pixel_sum"]) / footprint_calls
+            if footprint_calls
+            else None
+        )
+        residual_rd_rows = int(stats["footprint_trust_residual_rd_rows"])
+        stats["mean_footprint_trust_residual_rd_radius"] = (
+            float(stats["footprint_trust_residual_rd_radius_sum"])
+            / residual_rd_rows
+            if residual_rd_rows
+            else None
+        )
+        adaptive_calls = int(stats["adaptive_route_calls"])
+        stats["mean_adaptive_route_boundaries_m"] = (
+            [
+                float(value) / adaptive_calls
+                for value in stats["adaptive_route_boundary_sum_m"]
+            ]
+            if adaptive_calls
+            else None
+        )
+        stats["mean_adaptive_route_objective"] = (
+            float(stats["adaptive_route_objective_sum"]) / adaptive_calls
+            if adaptive_calls
+            else None
+        )
+        stats["mean_adaptive_route_iterations"] = (
+            float(stats["adaptive_route_iterations"]) / adaptive_calls
+            if adaptive_calls
+            else None
+        )
+        budget_calls = int(stats["budget_nms_calls"])
+        stats["mean_budget_nms_cell_pixels"] = (
+            float(stats["budget_nms_cell_pixel_sum"]) / budget_calls
+            if budget_calls
+            else None
+        )
+        stats["mean_budget_nms_log_depth_width"] = (
+            float(stats["budget_nms_log_depth_width_sum"]) / budget_calls
+            if budget_calls
+            else None
+        )
+        stats["responsibility_basis"] = self.frontview_far_field_config[
+            "responsibility_basis"
+        ]
+        stats["responsibility_shuffle_mode"] = self.frontview_far_field_config[
+            "responsibility_shuffle_mode"
+        ]
+        stats["preserve_sparse_track_geometry"] = bool(
+            self.frequency_sampling_config.get(
+                "preserve_sparse_track_geometry", False
+            )
+        )
+        stats["propagate_raster_sparse_identity"] = bool(
+            self.frequency_sampling_config.get(
+                "propagate_raster_sparse_identity", False
+            )
+        )
+        stats["ray_atlas"] = self.frontview_ray_atlas.summary()
+        return stats
 
-    def observe_frontview_directional_layer(self, camera):
-        return self.frontview_directional_layer.observe(camera)
+    def observe_frontview_directional_layer(self, camera, render_pkg=None):
+        uncertainty_mass = (
+            render_pkg.get("uncertainty_mass") if render_pkg is not None else None
+        )
+        return self.frontview_directional_layer.observe(
+            camera, uncertainty_mass=uncertainty_mass
+        )
 
     def activate_frontview_directional_layer(self, enabled=True):
         return self.frontview_directional_layer.activate(enabled)
@@ -3231,8 +4863,14 @@ class GaussianModel:
     def save_frontview_directional_layer(self, path):
         self.frontview_directional_layer.save(path)
 
-    def load_frontview_directional_layer(self, path):
+    def load_frontview_directional_layer(self, path, config_overrides=None):
         self.frontview_directional_layer.load(path)
+        if config_overrides:
+            config = dict(self.frontview_directional_layer.config)
+            config.update(config_overrides)
+            self.frontview_directional_layer.config = (
+                validate_front_view_directional_layer_config(config)
+            )
 
     def frontview_directional_layer_summary(self):
         return self.frontview_directional_layer.summary()
@@ -3290,6 +4928,88 @@ class GaussianModel:
                 "observed_gaussians": int((counts > 0).sum().item()),
             }
         )
+        routing = {}
+        for key, value in self.streaming_compute_routing_stats.items():
+            routing[key] = int(value.item()) if torch.is_tensor(value) else int(value)
+        packed_rows = routing["packed_rows"]
+        base_terms = (birth_degree + 1) ** 2
+        target_terms = (target_degree + 1) ** 2
+        evaluated_terms = (
+            routing["base_rows"] * base_terms
+            + routing["target_rows"] * target_terms
+        )
+        dense_terms = packed_rows * target_terms
+        routing.update(
+            {
+                "enabled": bool(
+                    self.streaming_appearance_lod_config["compute_routing"]
+                ),
+                "evaluated_sh_basis_terms": evaluated_terms,
+                "dense_sh_basis_terms": dense_terms,
+                "sh_basis_term_reduction_fraction": (
+                    1.0 - float(evaluated_terms) / float(dense_terms)
+                    if dense_terms
+                    else 0.0
+                ),
+                "target_band_row_reduction_fraction": (
+                    float(routing["skipped_target_band_rows"]) / packed_rows
+                    if packed_rows
+                    else 0.0
+                ),
+            }
+        )
+        routing["route_active_sh_basis_term_reduction_fraction"] = routing[
+            "sh_basis_term_reduction_fraction"
+        ]
+        routing["route_active_target_band_row_reduction_fraction"] = routing[
+            "target_band_row_reduction_fraction"
+        ]
+        shn_parameter_bytes = 0
+        shn_optimizer_state_bytes = 0
+        evidence_state_bytes = 0
+        for _, group, _, _ in records:
+            shn = group.splats["shN"]
+            shn_parameter_bytes += shn.numel() * shn.element_size()
+            optimizer = group.optimizers.get("shN") if group.optimizers else None
+            if optimizer is not None:
+                state = optimizer.state.get(shn, {})
+                for state_name in ("exp_avg", "exp_avg_sq"):
+                    tensor = state.get(state_name)
+                    if torch.is_tensor(tensor):
+                        shn_optimizer_state_bytes += (
+                            tensor.numel() * tensor.element_size()
+                        )
+            tensor = group.non_trainable_params.get(
+                "appearance_band_gradient_ema"
+            )
+            if torch.is_tensor(tensor):
+                evidence_state_bytes += tensor.numel() * tensor.element_size()
+        routing.update(
+            {
+                "shn_parameter_bytes": shn_parameter_bytes,
+                "shn_optimizer_state_bytes": shn_optimizer_state_bytes,
+                "gradient_evidence_state_bytes": evidence_state_bytes,
+                "gradient_ema_dtype": self.streaming_appearance_lod_config[
+                    "gradient_ema_dtype"
+                ],
+                "gradient_ema_scale": self.streaming_appearance_lod_config[
+                    "gradient_ema_scale"
+                ],
+                "warmup_evidence_updates": self.streaming_appearance_lod_config[
+                    "compute_routing_warmup_evidence_updates"
+                ],
+            }
+        )
+        if torch.cuda.is_available() and str(self.device).startswith("cuda"):
+            routing["peak_cuda_allocated_bytes"] = torch.cuda.max_memory_allocated(
+                self.device
+            )
+            routing["peak_cuda_reserved_bytes"] = torch.cuda.max_memory_reserved(
+                self.device
+            )
+        result["compute_routing"] = routing
+        if self.tgbr_sparse_model_stats is not None:
+            result["sparse_model"] = dict(self.tgbr_sparse_model_stats)
         return result
 
     def frontview_sparse_scale_map_summary(self):
@@ -3357,6 +5077,41 @@ class GaussianModel:
                     split["max_scale_expansions"] = torch.cat(
                         (old_limits[keep], child_limits), dim=0
                     )
+                    for name, value in group.non_trainable_params.items():
+                        if name in (
+                            "init_scales",
+                            "max_scale_expansions",
+                            "mean_anchors",
+                            "max_mean_displacements",
+                        ):
+                            continue
+                        child_shape = (4 * len(local),) + tuple(value.shape[1:])
+                        if value.dtype == torch.bool:
+                            children = torch.zeros(
+                                child_shape, device=value.device, dtype=value.dtype
+                            )
+                        elif name in (
+                            "footprint_target_scales",
+                            "footprint_release_scale_expansions",
+                        ):
+                            children = torch.full(
+                                child_shape,
+                                float("inf"),
+                                device=value.device,
+                                dtype=value.dtype,
+                            )
+                        elif name in ("track_ids", "gaussian_uids", "birth_frame_ids"):
+                            children = torch.full(
+                                child_shape,
+                                -1,
+                                device=value.device,
+                                dtype=value.dtype,
+                            )
+                        else:
+                            children = torch.zeros(
+                                child_shape, device=value.device, dtype=value.dtype
+                            )
+                        split[name] = torch.cat((value[keep], children), dim=0)
                     child_anchors = split["means"][-4 * len(local) :].detach().clone()
                     child_displacements = old_displacements[local][None].expand(
                         4, -1
@@ -3840,8 +5595,10 @@ class GaussianModel:
         render_pkg=None,
         level=0,
         reference_cameras=None,
+        causal_reference_cameras=None,
         coverage_recovery=False,
         coverage_recovery_translation_m=None,
+        coverage_recovery_budget=None,
     ):
         """Run the unmodified host proposal generator without permanent writes.
 
@@ -3857,6 +5614,10 @@ class GaussianModel:
             extra_pts_num = int(
                 self.extra_pts_num // (2**level) ** 1.5
             )  # theoretically it should be 2.0, use 1.5 to generate more points
+            if coverage_recovery_budget is not None:
+                extra_pts_num = min(extra_pts_num, int(coverage_recovery_budget))
+                if extra_pts_num < 1:
+                    raise ValueError("Coverage recovery budget must be positive")
             candidate_pool_num = extra_pts_num
             if self._frontview_residual_cover_enabled():
                 candidate_pool_num *= int(
@@ -3924,7 +5685,11 @@ class GaussianModel:
                     [pts_2d_flat % w + 0.5, pts_2d_flat // w + 0.5], axis=-1
                 ).float()
                 pts_depth = flatten_depth[sparse_pts_mask]
-                if self._frontview_track_fusion_enabled():
+                if self._frontview_track_fusion_enabled() or bool(
+                    self.frequency_sampling_config.get(
+                        "propagate_raster_sparse_identity", False
+                    )
+                ):
                     proposal_track_ids = cam.get_sparse_point_ids(level).to(
                         device=device, dtype=torch.long
                     )
@@ -3945,6 +5710,12 @@ class GaussianModel:
             )
             proposal_multiview_support = torch.zeros(
                 (len(pts_depth),), device=device, dtype=torch.float32
+            )
+            proposal_budget_primary = torch.ones(
+                (len(pts_depth),), device=device, dtype=torch.bool
+            )
+            proposal_tracked_metric = torch.zeros(
+                (len(pts_depth),), device=device, dtype=torch.bool
             )
             fusion_pts_2d = pts_2d
             fusion_pts_depth = pts_depth
@@ -4006,10 +5777,53 @@ class GaussianModel:
                     selected_pts_2d = selected_pts_2d[training_indices]
                     selected_pts_depth = selected_pts_depth[training_indices]
 
+            landmark_conditioning_mode = self.causal_landmark_memory_config[
+                "conditioning_mode"
+            ]
+            landmark_batch = None
+            if (
+                self.causal_landmark_memory.enabled
+                and landmark_conditioning_mode in ("all_queries", "admitted_mean")
+            ):
+                occupied_pixels = torch.nonzero(
+                    sparse_pts_mask, as_tuple=False
+                ).flatten()
+                remaining_conditioning_budget = max(0, 500 - len(selected_pts_2d))
+                landmark_batch = self.causal_landmark_memory.project(
+                    cam,
+                    level,
+                    exclude_ids=cam.get_point_ids(),
+                    occupied_pixel_indices=occupied_pixels.detach().cpu().numpy(),
+                    maximum_points=remaining_conditioning_budget,
+                )
+                if (
+                    len(landmark_batch)
+                    and landmark_conditioning_mode == "all_queries"
+                ):
+                    selected_pts_2d = torch.cat(
+                        (
+                            selected_pts_2d,
+                            torch.from_numpy(landmark_batch.uv).to(
+                                device=device, dtype=selected_pts_2d.dtype
+                            ),
+                        ),
+                        dim=0,
+                    )
+                    selected_pts_depth = torch.cat(
+                        (
+                            selected_pts_depth,
+                            torch.from_numpy(landmark_batch.depths).to(
+                                device=device, dtype=selected_pts_depth.dtype
+                            ),
+                        ),
+                        dim=0,
+                    )
+
             frequency_importance = None
             footprint_evidence = None
             admission_evidence = None
             depth_prior_fallback_pixel_indices = None
+            diff = None
             if render_pkg is not None:
                 diff = render_pkg["diff"].reshape(-1)
                 valid_extra = torch.logical_and(
@@ -4026,6 +5840,8 @@ class GaussianModel:
                 proposal_multiview_support = proposal_multiview_support[
                     valid_semi_pts
                 ]
+                proposal_budget_primary = proposal_budget_primary[valid_semi_pts]
+                proposal_tracked_metric = proposal_tracked_metric[valid_semi_pts]
                 proposal_track_ids = proposal_track_ids[valid_semi_pts]
 
                 extra_pts_2d = flatten_index[valid_extra]
@@ -4088,22 +5904,181 @@ class GaussianModel:
                 # est_depth, std_mask = self.depth_cov_estimator.query(cam.get_gt_image(level), selected_pts_depth, selected_pts_2d, extra_pts_2d)
                 candidate_count = len(extra_pts_2d)
                 query_pts_2d = extra_pts_2d
+                original_posterior_depth_all = None
                 if len(calibration_pts_2d) > 0:
                     query_pts_2d = torch.cat(
                         (extra_pts_2d, calibration_pts_2d), dim=0
                     )
-                est_depth_all, std_mask_all, depth_std_all = self.depth_cov_estimator.query_tensor(
-                    cam.get_gt_image(level),
-                    selected_pts_depth,
-                    selected_pts_2d,
-                    query_pts_2d,
-                    return_std=True,
-                )
+                if (
+                    landmark_conditioning_mode == "admitted_mean"
+                    and landmark_batch is not None
+                    and len(landmark_batch)
+                ):
+                    depth_context = self.depth_cov_estimator.prepare_tensor_context(
+                        cam.get_gt_image(level)
+                    )
+                    est_depth_all, std_mask_all, depth_std_all = (
+                        self.depth_cov_estimator.query_prepared_tensor(
+                            depth_context,
+                            selected_pts_depth,
+                            selected_pts_2d,
+                            query_pts_2d,
+                        )
+                    )
+                    conditioned_uv = torch.cat(
+                        (
+                            selected_pts_2d,
+                            torch.from_numpy(landmark_batch.uv).to(
+                                device=device, dtype=selected_pts_2d.dtype
+                            ),
+                        ),
+                        dim=0,
+                    )
+                    conditioned_depth = torch.cat(
+                        (
+                            selected_pts_depth,
+                            torch.from_numpy(landmark_batch.depths).to(
+                                device=device, dtype=selected_pts_depth.dtype
+                            ),
+                        ),
+                        dim=0,
+                    )
+                    conditioned_estimate, _, conditioned_std = (
+                        self.depth_cov_estimator.query_prepared_tensor(
+                            depth_context,
+                            conditioned_depth,
+                            conditioned_uv,
+                            query_pts_2d,
+                        )
+                    )
+                    admitted = torch.zeros_like(std_mask_all)
+                    admitted[:candidate_count] = std_mask_all[:candidate_count]
+                    transport_weights = torch.ones_like(est_depth_all)
+                    transported_estimate = conditioned_estimate
+                    if (
+                        self.causal_landmark_memory_config["transport_rule"]
+                        == "variance_gain"
+                    ):
+                        transported_estimate, transport_weights = (
+                            information_gain_transport(
+                                est_depth_all,
+                                conditioned_estimate,
+                                depth_std_all,
+                                conditioned_std,
+                            )
+                        )
+                    self.causal_landmark_memory.record_admitted_mean(
+                        est_depth_all[admitted].detach().cpu().numpy(),
+                        transported_estimate[admitted].detach().cpu().numpy(),
+                        len(landmark_batch),
+                        transport_weights[admitted].detach().cpu().numpy(),
+                        depth_std_all[admitted].detach().cpu().numpy(),
+                        conditioned_std[admitted].detach().cpu().numpy(),
+                    )
+                    if self.causal_landmark_memory.uses_original_posterior_responsibility:
+                        original_posterior_depth_all = est_depth_all.clone()
+                    est_depth_all[admitted] = transported_estimate[admitted]
+                    if self.causal_landmark_memory_config[
+                        "propagate_conditioned_uncertainty"
+                    ]:
+                        depth_std_all[admitted] = conditioned_std[admitted]
+                else:
+                    est_depth_all, std_mask_all, depth_std_all = (
+                        self.depth_cov_estimator.query_tensor(
+                            cam.get_gt_image(level),
+                            selected_pts_depth,
+                            selected_pts_2d,
+                            query_pts_2d,
+                            return_std=True,
+                        )
+                    )
                 est_depth = est_depth_all[:candidate_count]
+                responsibility_est_depth = (
+                    est_depth.clone()
+                    if original_posterior_depth_all is None
+                    else original_posterior_depth_all[:candidate_count]
+                )
                 std_mask = std_mask_all[:candidate_count]
+                original_responsibility_mask = (
+                    torch.zeros_like(std_mask)
+                    if original_posterior_depth_all is None
+                    else std_mask.clone()
+                )
                 depth_std = depth_std_all[:candidate_count]
                 calibration_pred_depth = est_depth_all[candidate_count:]
                 calibration_valid = std_mask_all[candidate_count:]
+                causal_metric_batch = None
+                causal_posterior_prior_maps = None
+
+                if (
+                    self.causal_landmark_memory.enabled
+                    and landmark_conditioning_mode == "fallback_repair"
+                    and coverage_recovery
+                    and int(std_mask.sum().item())
+                    < int(
+                        self.frontview_coverage_recovery_config[
+                            "depth_fallback_min_valid"
+                        ]
+                    )
+                ):
+                    valid_before_count = int(std_mask.sum().item())
+                    invalid_before_count = int((~std_mask).sum().item())
+                    occupied_pixels = torch.nonzero(
+                        sparse_pts_mask, as_tuple=False
+                    ).flatten()
+                    landmark_batch = self.causal_landmark_memory.project(
+                        cam,
+                        level,
+                        exclude_ids=cam.get_point_ids(),
+                        occupied_pixel_indices=(
+                            occupied_pixels.detach().cpu().numpy()
+                        ),
+                        maximum_points=max(0, 500 - len(selected_pts_2d)),
+                    )
+                    if len(landmark_batch):
+                        repaired_uv = torch.cat(
+                            (
+                                selected_pts_2d,
+                                torch.from_numpy(landmark_batch.uv).to(
+                                    device=device,
+                                    dtype=selected_pts_2d.dtype,
+                                ),
+                            ),
+                            dim=0,
+                        )
+                        repaired_depth = torch.cat(
+                            (
+                                selected_pts_depth,
+                                torch.from_numpy(landmark_batch.depths).to(
+                                    device=device,
+                                    dtype=selected_pts_depth.dtype,
+                                ),
+                            ),
+                            dim=0,
+                        )
+                        invalid_before = ~std_mask
+                        repaired_estimate, repaired_valid, repaired_std = (
+                            self.depth_cov_estimator.query_tensor(
+                                cam.get_gt_image(level),
+                                repaired_depth,
+                                repaired_uv,
+                                extra_pts_2d,
+                                return_std=True,
+                            )
+                        )
+                        newly_valid = invalid_before & repaired_valid
+                        est_depth[newly_valid] = repaired_estimate[newly_valid]
+                        depth_std[newly_valid] = repaired_std[newly_valid]
+                        std_mask[newly_valid] = True
+                        newly_valid_count = int(newly_valid.sum().item())
+                    else:
+                        newly_valid_count = 0
+                    self.causal_landmark_memory.record_repair(
+                        valid_before=valid_before_count,
+                        invalid_before=invalid_before_count,
+                        newly_valid=newly_valid_count,
+                        conditioning_landmarks=len(landmark_batch),
+                    )
 
                 if (
                     coverage_recovery
@@ -4115,7 +6090,9 @@ class GaussianModel:
                         int(cam.cam_idx)
                     )
                     valid_before = int(std_mask.sum().item())
+                    fallback_candidate_mask = torch.zeros_like(std_mask)
 
+                    motion_floor = None
                     prior_depth = sparse_prior_depth
                     if (
                         prior_depth is not None
@@ -4143,12 +6120,237 @@ class GaussianModel:
                         stats["last_depth_fallback_motion_floor_m"] = float(
                             motion_floor
                         )
-                    if prior_depth is not None and valid_before < int(
+                    causal_metric_triggered = bool(
+                        self.causal_metric_birth.enabled
+                        and valid_before
+                        < int(
+                            self.frontview_coverage_recovery_config[
+                                "depth_fallback_min_valid"
+                            ]
+                        )
+                    )
+                    causal_replaces_fallback = bool(
+                        causal_metric_triggered
+                        and causal_birth_replaces_depth_fallback(
+                            self.causal_metric_birth_config,
+                            dual_responsibility_enabled=(
+                                self.causal_dual_responsibility_config["enabled"]
+                            ),
+                        )
+                    )
+                    if causal_metric_triggered:
+                        causal_metric_batch = self.causal_metric_birth.certify(
+                            cam,
+                            list(
+                                causal_reference_cameras
+                                if causal_reference_cameras is not None
+                                else (reference_cameras or ())
+                            ),
+                            level,
+                            valid_extra.view(height, w),
+                            diff.view(height, w),
+                            float(self.depth_cov_estimator.std_valid_threshold),
+                            int(extra_pts_num),
+                            query_uv=extra_pts_2d[~std_mask],
+                        )
+                        if (
+                            self.causal_metric_birth_config["birth_mode"]
+                            == "tracked_features"
+                            and self.causal_metric_birth_config["posterior_action"]
+                            != "fuse"
+                        ):
+                            causal_metric_batch = None
+                        if (
+                            self.causal_metric_birth_config["birth_mode"]
+                            == "depthcov_recondition"
+                        ):
+                            reconditioned_uv = selected_pts_2d
+                            reconditioned_depth = selected_pts_depth
+                            if len(causal_metric_batch):
+                                reconditioned_uv = torch.cat(
+                                    (
+                                        reconditioned_uv,
+                                        torch.from_numpy(causal_metric_batch.uv).to(
+                                            device=device,
+                                            dtype=reconditioned_uv.dtype,
+                                        ),
+                                    ),
+                                    dim=0,
+                                )
+                                reconditioned_depth = torch.cat(
+                                    (
+                                        reconditioned_depth,
+                                        torch.from_numpy(
+                                            causal_metric_batch.depths
+                                        ).to(
+                                            device=device,
+                                            dtype=reconditioned_depth.dtype,
+                                        ),
+                                    ),
+                                    dim=0,
+                                )
+                            (
+                                reconditioned_estimate,
+                                reconditioned_valid,
+                                reconditioned_std,
+                            ) = self.depth_cov_estimator.query_tensor(
+                                cam.get_gt_image(level),
+                                reconditioned_depth,
+                                reconditioned_uv,
+                                query_pts_2d,
+                                return_std=True,
+                            )
+                            est_depth_all = reconditioned_estimate
+                            std_mask_all = reconditioned_valid
+                            depth_std_all = reconditioned_std
+                            est_depth = est_depth_all[:candidate_count]
+                            std_mask = std_mask_all[:candidate_count]
+                            depth_std = depth_std_all[:candidate_count]
+                            calibration_pred_depth = est_depth_all[candidate_count:]
+                            calibration_valid = std_mask_all[candidate_count:]
+                            self.causal_metric_birth.record_reconditioned_validity(
+                                valid_before, int(std_mask.sum().item())
+                            )
+                            causal_metric_batch = None
+                        if (
+                            self.causal_metric_birth_config["birth_mode"]
+                            == "cross_fitted_gauge"
+                            and causal_metric_batch is not None
+                        ):
+                            gauge_applied_rows = 0
+                            fallback_hypotheses = [
+                                value
+                                for value in (sparse_prior_depth, motion_floor)
+                                if value is not None
+                            ]
+                            if len(causal_metric_batch) >= 4 and fallback_hypotheses:
+                                track_uv = torch.from_numpy(
+                                    causal_metric_batch.uv
+                                ).to(device=device, dtype=selected_pts_2d.dtype)
+                                (
+                                    track_field_depth,
+                                    _,
+                                    track_field_std,
+                                ) = self.depth_cov_estimator.query_tensor(
+                                    cam.get_gt_image(level),
+                                    selected_pts_depth,
+                                    selected_pts_2d,
+                                    track_uv,
+                                    return_std=True,
+                                )
+                                gauge = cross_fitted_track_depth_gauge(
+                                    causal_metric_batch.uv,
+                                    track_field_depth.detach().cpu().numpy(),
+                                    track_field_std.detach().cpu().numpy(),
+                                    causal_metric_batch.depths,
+                                    causal_metric_batch.log_depth_stds,
+                                    fallback_hypotheses,
+                                    fallback_log_std=float(
+                                        self.depth_cov_estimator.std_valid_threshold
+                                    ),
+                                    shuffle_binding=bool(
+                                        self.causal_metric_birth_config[
+                                            "shuffle_field_binding"
+                                        ]
+                                    ),
+                                    seed=(
+                                        int(
+                                            self.causal_metric_birth_config[
+                                                "shuffle_seed"
+                                            ]
+                                        )
+                                        + int(cam.cam_idx)
+                                    ),
+                                )
+                            else:
+                                gauge = cross_fitted_track_depth_gauge(
+                                    np.empty((0, 2), dtype=np.float32),
+                                    np.empty((0,), dtype=np.float32),
+                                    np.empty((0,), dtype=np.float32),
+                                    np.empty((0,), dtype=np.float32),
+                                    np.empty((0,), dtype=np.float32),
+                                    fallback_hypotheses or [1.0],
+                                    fallback_log_std=float(
+                                        self.depth_cov_estimator.std_valid_threshold
+                                    ),
+                                )
+                            apply_gauge = (
+                                self.causal_metric_birth_config["posterior_action"]
+                                == "fuse"
+                            )
+                            if apply_gauge and gauge.accepted_field:
+                                finite_field = (
+                                    torch.isfinite(est_depth)
+                                    & torch.isfinite(depth_std)
+                                    & (est_depth > 0.0)
+                                )
+                                predictive_std = torch.sqrt(
+                                    torch.clamp(
+                                        depth_std.square()
+                                        + float(gauge.log_scale_variance),
+                                        min=0.0,
+                                    )
+                                )
+                                field_rows = finite_field
+                                est_depth[field_rows] *= math.exp(gauge.log_scale)
+                                depth_std[field_rows] = predictive_std[field_rows]
+                                std_mask[field_rows] = True
+                                gauge_applied_rows = int(field_rows.sum().item())
+                                prior_depth = None
+                            elif apply_gauge and gauge.selected_model == "fallback":
+                                prior_depth = float(gauge.selected_fallback_depth)
+                            elif apply_gauge:
+                                prior_depth = None
+                            self.causal_metric_birth.record_depth_gauge(
+                                gauge,
+                                applied_rows=gauge_applied_rows,
+                                frame_id=int(cam.cam_idx),
+                            )
+                            causal_metric_batch = None
+                        if (
+                            self.causal_metric_birth_config["birth_mode"]
+                            == "posterior_proxy"
+                            and causal_metric_batch is not None
+                        ):
+                            query_pixels = (
+                                extra_pts_2d[:, 1].int() * w
+                                + extra_pts_2d[:, 0].int()
+                            )
+                            prior_depth_map = torch.full(
+                                (height * w,),
+                                float("nan"),
+                                device=device,
+                                dtype=est_depth.dtype,
+                            )
+                            prior_std_map = torch.full(
+                                (height * w,),
+                                float(self.depth_cov_estimator.std_valid_threshold),
+                                device=device,
+                                dtype=depth_std.dtype,
+                            )
+                            prior_valid_map = torch.zeros(
+                                (height * w,), device=device, dtype=torch.bool
+                            )
+                            prior_depth_map[query_pixels] = est_depth
+                            prior_std_map[query_pixels] = depth_std
+                            prior_valid_map[query_pixels] = std_mask
+                            causal_posterior_prior_maps = (
+                                prior_depth_map,
+                                prior_std_map,
+                                prior_valid_map,
+                            )
+                    if (
+                        prior_depth is not None
+                        and valid_before
+                        < int(
                         self.frontview_coverage_recovery_config[
                             "depth_fallback_min_valid"
                         ]
+                        )
+                        and not causal_replaces_fallback
                     ):
                         fallback = ~std_mask
+                        fallback_candidate_mask = fallback.clone()
                         fallback_uv = extra_pts_2d[fallback]
                         depth_prior_fallback_pixel_indices = (
                             fallback_uv[:, 1].int() * w + fallback_uv[:, 0].int()
@@ -4164,7 +6366,10 @@ class GaussianModel:
                             "depth_fallback_confidence"
                         ],
                     }
-                    if (
+                    if causal_replaces_fallback:
+                        fallback_rows = 0
+                        map_rows = 0
+                    elif (
                         self.frontview_coverage_recovery_config[
                             "depth_fallback_map_enabled"
                         ]
@@ -4185,10 +6390,10 @@ class GaussianModel:
                             est_depth,
                             std_mask,
                             depth_std,
-                            visible_depth=render_pkg["depth"].reshape(-1)[
+                            visible_depth=self._geometry_depth(render_pkg).reshape(-1)[
                                 extra_pixel_indices
                             ],
-                            visible_opacity=render_pkg["opacity"].reshape(-1)[
+                            visible_opacity=self._geometry_opacity(render_pkg).reshape(-1)[
                                 extra_pixel_indices
                             ],
                             front_ratio=self.frontview_coverage_recovery_config[
@@ -4226,6 +6431,69 @@ class GaussianModel:
                             fallback_rows - map_rows
                         )
                         stats["last_depth_fallback_frame"] = int(cam.cam_idx)
+                        if self.frontview_coverage_recovery_config[
+                            "multiview_depth_enabled"
+                        ]:
+                            fallback_indices = torch.nonzero(
+                                fallback_candidate_mask, as_tuple=False
+                            ).flatten()
+                            selected_depths, support_scores, hypothesis_count = (
+                                self._frontview_recovery_multiview_depths(
+                                    cam,
+                                    list(reference_cameras or ()),
+                                    extra_pts_2d[fallback_indices],
+                                    est_depth[fallback_indices],
+                                    torch.full_like(
+                                        est_depth[fallback_indices],
+                                        float(
+                                            self.frontview_coverage_recovery_config[
+                                                "depth_fallback_confidence"
+                                            ]
+                                        ),
+                                    ),
+                                    prior_depth,
+                                    level,
+                                )
+                            )
+                            est_depth[fallback_indices] = selected_depths
+                            supported = support_scores > 0.0
+                            if self.frontview_coverage_recovery_config[
+                                "multiview_depth_mode"
+                            ] == "posterior_inverse_depth":
+                                depth_std[fallback_indices] = (
+                                    self.depth_cov_estimator.std_valid_threshold
+                                    * (1.0 - support_scores)
+                                )
+                            stats["multiview_depth_calls"] += 1
+                            stats["multiview_depth_rows"] += int(
+                                fallback_indices.numel()
+                            )
+                            stats["multiview_depth_supported_rows"] += int(
+                                supported.sum().item()
+                            )
+                            stats["multiview_depth_concentrated_rows"] += int(
+                                (support_scores >= 0.5).sum().item()
+                            )
+                            stats["multiview_depth_score_sum"] += float(
+                                support_scores.sum().item()
+                            )
+                            if self.frontview_coverage_recovery_config[
+                                "multiview_depth_mode"
+                            ] == "posterior_inverse_depth":
+                                stats["multiview_depth_concentration_sum"] += float(
+                                    support_scores.sum().item()
+                                )
+                            stats["multiview_depth_selected_sum_m"] += float(
+                                selected_depths[supported].sum().item()
+                            )
+                            stats["multiview_depth_hypotheses_sum"] += int(
+                                hypothesis_count
+                            )
+                            stats["multiview_depth_shuffled_calls"] += int(
+                                self.frontview_coverage_recovery_config[
+                                    "shuffle_multiview_depth"
+                                ]
+                            )
                     elif prior_depth is None and valid_before < int(
                         self.frontview_coverage_recovery_config[
                             "depth_fallback_min_valid"
@@ -4235,8 +6503,16 @@ class GaussianModel:
 
                 # Log("Valid additional pts: {}".format(np.sum(std_mask)), tag="GaussianModel")
 
-                if torch.sum(std_mask) > 0:
+                if torch.sum(std_mask) > 0 or (
+                    causal_metric_batch is not None and len(causal_metric_batch) > 0
+                ):
+                    responsibility_est_depth = torch.where(
+                        original_responsibility_mask,
+                        responsibility_est_depth,
+                        est_depth,
+                    )
                     extra_pts_depth = est_depth[std_mask]
+                    extra_responsibility_depth = responsibility_est_depth[std_mask]
                     extra_pts_2d = extra_pts_2d[std_mask]
                     extra_depth_confidence = torch.clamp(
                         1.0
@@ -4244,6 +6520,9 @@ class GaussianModel:
                         / max(self.depth_cov_estimator.std_valid_threshold, 1.0e-8),
                         min=0.0,
                         max=1.0,
+                    )
+                    extra_budget_primary = torch.ones(
+                        len(extra_pts_depth), device=device, dtype=torch.bool
                     )
                     if transport_enabled:
                         stats = self.frontview_depth_transport_stats
@@ -4323,6 +6602,9 @@ class GaussianModel:
                             )
                             temporal_keep = ~temporal_reject
                             extra_pts_depth = extra_pts_depth[temporal_keep]
+                            extra_responsibility_depth = extra_responsibility_depth[
+                                temporal_keep
+                            ]
                             extra_pts_2d = extra_pts_2d[temporal_keep]
                             extra_depth_confidence = extra_depth_confidence[
                                 temporal_keep
@@ -4349,10 +6631,10 @@ class GaussianModel:
                             birth_residual = render_pkg["diff"].reshape(-1)[
                                 pixel_indices
                             ]
-                            birth_map_depth = render_pkg["depth"].reshape(-1)[
+                            birth_map_depth = self._geometry_depth(render_pkg).reshape(-1)[
                                 pixel_indices
                             ]
-                            opacity = render_pkg.get("opacity")
+                            opacity = self._geometry_opacity(render_pkg)
                             birth_map_opacity = (
                                 torch.zeros_like(extra_pts_depth)
                                 if opacity is None
@@ -4391,8 +6673,12 @@ class GaussianModel:
                             anchor_occupied=anchor_occupied,
                         )
                         extra_pts_depth = extra_pts_depth[selection]
+                        extra_responsibility_depth = extra_responsibility_depth[
+                            selection
+                        ]
                         extra_pts_2d = extra_pts_2d[selection]
                         extra_depth_confidence = extra_depth_confidence[selection]
+                        extra_budget_primary = extra_budget_primary[selection]
                         stats = self.frontview_birth_stats
                         stats["calls"] += 1
                         stats["pool_rows"] += int(birth_stats["pool"])
@@ -4463,10 +6749,87 @@ class GaussianModel:
                                     ]
                                 ),
                             )
+                            adaptive_metadata = None
+                        elif selection_mode.startswith("adaptive_log_depth_"):
+                            if diff is None:
+                                residuals = torch.ones_like(extra_depth_confidence)
+                            else:
+                                candidate_pixels = (
+                                    extra_pts_2d[:, 1].int() * w
+                                    + extra_pts_2d[:, 0].int()
+                                )
+                                residuals = diff[candidate_pixels]
+                            scores = residuals * torch.clamp(
+                                extra_depth_confidence, 0.0, 1.0
+                            )
+                            rate_distortion_metadata = None
+                            density_weights = None
+                            if selection_mode in (
+                                "adaptive_log_depth_rate_distortion",
+                                "adaptive_log_depth_rate_distortion_shuffled",
+                            ):
+                                (
+                                    density_weights,
+                                    rate_distortion_metadata,
+                                ) = rate_distortion_density_weights(
+                                    cam.get_gt_image(level),
+                                    extra_pts_2d,
+                                    extra_depth_confidence,
+                                    image_size=(w, cam.get_height(level)),
+                                    budget=extra_pts_num,
+                                    pool_multiplier=int(
+                                        self.frontview_sampling_config[
+                                            "pool_multiplier"
+                                        ]
+                                    ),
+                                )
+                            selection, adaptive_metadata = (
+                                adaptive_log_depth_indices(
+                                    extra_responsibility_depth,
+                                    extra_depth_confidence,
+                                    residuals,
+                                    extra_pts_num,
+                                    uv=extra_pts_2d,
+                                    image_size=(w, cam.get_height(level)),
+                                    pool_multiplier=int(
+                                        self.frontview_sampling_config[
+                                            "pool_multiplier"
+                                        ]
+                                    ),
+                                    weighted=(
+                                        selection_mode
+                                        == "adaptive_log_depth_importance"
+                                    ),
+                                    shuffle_regimes=selection_mode in (
+                                        "adaptive_log_depth_shuffled",
+                                        "adaptive_log_depth_coverage_shuffled",
+                                    ),
+                                    coverage_priority=(
+                                        "confidence"
+                                        if selection_mode
+                                        in (
+                                            "adaptive_log_depth_coverage",
+                                            "adaptive_log_depth_coverage_shuffled",
+                                        )
+                                        else (
+                                            "residual_confidence"
+                                            if selection_mode
+                                            == "adaptive_log_depth_residual_coverage"
+                                            else None
+                                        )
+                                    ),
+                                    density_weights=density_weights,
+                                    shuffle_density=(
+                                        selection_mode
+                                        == "adaptive_log_depth_rate_distortion_shuffled"
+                                    ),
+                                    seed=selection_seed,
+                                )
+                            )
                         elif selection_mode == "projective_coverage":
                             selection = projective_coverage_indices(
                                 extra_pts_2d,
-                                extra_pts_depth,
+                                extra_responsibility_depth,
                                 extra_depth_confidence,
                                 extra_pts_num,
                                 self.frontview_sampling_config["depth_edges_m"],
@@ -4484,6 +6847,26 @@ class GaussianModel:
                                 ),
                                 seed=selection_seed,
                             )
+                            adaptive_metadata = None
+                        elif selection_mode == "residual_importance":
+                            if diff is None:
+                                residuals = torch.ones_like(extra_depth_confidence)
+                            else:
+                                candidate_pixels = (
+                                    extra_pts_2d[:, 1].int() * w
+                                    + extra_pts_2d[:, 0].int()
+                                )
+                                residuals = diff[candidate_pixels]
+                            scores = residuals * torch.clamp(
+                                extra_depth_confidence, 0.0, 1.0
+                            )
+                            selection = residual_importance_indices(
+                                residuals,
+                                extra_depth_confidence,
+                                extra_pts_num,
+                                seed=selection_seed,
+                            )
+                            adaptive_metadata = None
                         else:
                             if selection_mode == "evidence_balanced":
                                 scores, valid_reference, _ = (
@@ -4515,6 +6898,7 @@ class GaussianModel:
                                 ),
                                 seed=selection_seed,
                             )
+                            adaptive_metadata = None
                         stats = self.frontview_sampling_stats
                         stats["calls"] += 1
                         stats["pool_rows"] += int(scores.numel())
@@ -4526,33 +6910,110 @@ class GaussianModel:
                         stats["last_mean_score"] = float(
                             scores[selection].mean().item()
                         )
-                        edge0, edge1 = (
-                            float(value)
-                            for value in self.frontview_sampling_config[
-                                "depth_edges_m"
+                        if adaptive_metadata is not None:
+                            pool_counts = adaptive_metadata["pool_counts"]
+                            selected_counts = adaptive_metadata["selected_counts"]
+                            stats["adaptive_calls"] += 1
+                            stats["adaptive_iterations"] += int(
+                                adaptive_metadata["iterations"]
+                            )
+                            stats["adaptive_objective_sum"] += float(
+                                adaptive_metadata["objective"]
+                            )
+                            stats["adaptive_boundary_sum_m"] = [
+                                old + new
+                                for old, new in zip(
+                                    stats["adaptive_boundary_sum_m"],
+                                    adaptive_metadata["boundaries_m"],
+                                )
                             ]
-                        )
-                        pool_counts = (
-                            int((extra_pts_depth < edge0).sum().item()),
-                            int(
-                                (
-                                    (extra_pts_depth >= edge0)
-                                    & (extra_pts_depth < edge1)
-                                ).sum().item()
-                            ),
-                            int((extra_pts_depth >= edge1).sum().item()),
-                        )
-                        selected_depth = extra_pts_depth[selection]
-                        selected_counts = (
-                            int((selected_depth < edge0).sum().item()),
-                            int(
-                                (
-                                    (selected_depth >= edge0)
-                                    & (selected_depth < edge1)
-                                ).sum().item()
-                            ),
-                            int((selected_depth >= edge1).sum().item()),
-                        )
+                            stats["last_adaptive_boundaries_m"] = (
+                                adaptive_metadata["boundaries_m"]
+                            )
+                            stats["adaptive_assigned_pool_counts"] = [
+                                old + new
+                                for old, new in zip(
+                                    stats["adaptive_assigned_pool_counts"],
+                                    adaptive_metadata["assigned_pool_counts"],
+                                )
+                            ]
+                            stats["adaptive_quotas"] = [
+                                old + new
+                                for old, new in zip(
+                                    stats["adaptive_quotas"],
+                                    adaptive_metadata["quotas"],
+                                )
+                            ]
+                            if adaptive_metadata["coverage_cell_px"] is not None:
+                                stats["adaptive_coverage_calls"] += 1
+                                stats[
+                                    "adaptive_coverage_cell_pixel_sum"
+                                ] += float(adaptive_metadata["coverage_cell_px"])
+                                stats["adaptive_coverage_representatives"] = [
+                                    old + new
+                                    for old, new in zip(
+                                        stats[
+                                            "adaptive_coverage_representatives"
+                                        ],
+                                        adaptive_metadata[
+                                            "coverage_representatives"
+                                        ],
+                                    )
+                                ]
+                            if rate_distortion_metadata is not None:
+                                stats["rate_distortion_calls"] += 1
+                                stats["rate_distortion_cell_pixel_sum"] += float(
+                                    rate_distortion_metadata["cell_px"]
+                                )
+                                density_min = rate_distortion_metadata["min"]
+                                density_max = rate_distortion_metadata["max"]
+                                stats["rate_distortion_density_min"] = (
+                                    density_min
+                                    if stats["rate_distortion_density_min"] is None
+                                    else min(
+                                        stats["rate_distortion_density_min"],
+                                        density_min,
+                                    )
+                                )
+                                stats["rate_distortion_density_max"] = (
+                                    density_max
+                                    if stats["rate_distortion_density_max"] is None
+                                    else max(
+                                        stats["rate_distortion_density_max"],
+                                        density_max,
+                                    )
+                                )
+                                stats["rate_distortion_shuffled_calls"] += int(
+                                    adaptive_metadata["density_shuffled"]
+                                )
+                        else:
+                            edge0, edge1 = (
+                                float(value)
+                                for value in self.frontview_sampling_config[
+                                    "depth_edges_m"
+                                ]
+                            )
+                            pool_counts = (
+                                int((extra_responsibility_depth < edge0).sum().item()),
+                                int(
+                                    (
+                                        (extra_responsibility_depth >= edge0)
+                                        & (extra_responsibility_depth < edge1)
+                                    ).sum().item()
+                                ),
+                                int((extra_responsibility_depth >= edge1).sum().item()),
+                            )
+                            selected_depth = extra_responsibility_depth[selection]
+                            selected_counts = (
+                                int((selected_depth < edge0).sum().item()),
+                                int(
+                                    (
+                                        (selected_depth >= edge0)
+                                        & (selected_depth < edge1)
+                                    ).sum().item()
+                                ),
+                                int((selected_depth >= edge1).sum().item()),
+                            )
                         stats["pool_depth_counts"] = [
                             old + new
                             for old, new in zip(
@@ -4575,6 +7036,11 @@ class GaussianModel:
                             and self.frontview_residual_cover_config[
                                 "refill_depthcov_pool"
                             ]
+                        ) or (
+                            self._frontview_far_field_enabled()
+                            and self.frontview_far_field_config[
+                                "posterior_budget_refill"
+                            ]
                         )
                         if refill_depthcov_pool:
                             primary = selection
@@ -4588,7 +7054,29 @@ class GaussianModel:
                                 ~is_primary, as_tuple=False
                             ).reshape(-1)
                             selection = torch.cat((primary, reserve), dim=0)
+                            extra_budget_primary = torch.cat(
+                                (
+                                    torch.ones_like(primary, dtype=torch.bool),
+                                    torch.zeros_like(reserve, dtype=torch.bool),
+                                )
+                            )
+                            if self.frontview_far_field_config[
+                                "posterior_budget_refill"
+                            ]:
+                                stats["posterior_refill_pool_rows"] += int(
+                                    len(selection)
+                                )
+                                stats["posterior_refill_primary_rows"] += int(
+                                    len(primary)
+                                )
+                        else:
+                            extra_budget_primary = torch.ones_like(
+                                selection, dtype=torch.bool
+                            )
                         extra_pts_depth = extra_pts_depth[selection]
+                        extra_responsibility_depth = extra_responsibility_depth[
+                            selection
+                        ]
                         extra_pts_2d = extra_pts_2d[selection]
                         extra_depth_confidence = extra_depth_confidence[selection]
 
@@ -4612,6 +7100,281 @@ class GaussianModel:
                             )
                         )
 
+                    if (
+                        causal_metric_batch is not None
+                        and causal_posterior_prior_maps is not None
+                        and self.causal_metric_birth_config["birth_mode"]
+                        == "posterior_proxy"
+                    ):
+                        selected_pixels = (
+                            extra_pts_2d[:, 1].int() * w
+                            + extra_pts_2d[:, 0].int()
+                        )
+                        prior_depth_map, prior_std_map, prior_valid_map = (
+                            causal_posterior_prior_maps
+                        )
+                        causal_posterior = fuse_candidate_log_depth_posteriors(
+                            extra_pts_2d,
+                            prior_depth_map[selected_pixels],
+                            prior_std_map[selected_pixels],
+                            prior_valid_map[selected_pixels],
+                            causal_metric_batch,
+                            image_size=(w, height),
+                            birth_budget=int(extra_pts_num),
+                            config=self.causal_metric_birth_config,
+                            seed=(
+                                int(self.causal_metric_birth_config["shuffle_seed"])
+                                + int(cam.cam_idx)
+                            ),
+                        )
+                        certified = causal_posterior.certified
+                        apply_posterior = (
+                            self.causal_metric_birth_config["posterior_action"]
+                            == "fuse"
+                        )
+                        if apply_posterior and bool(certified.any().item()):
+                            extra_pts_depth[certified] = causal_posterior.depths[
+                                certified
+                            ].to(extra_pts_depth)
+                            extra_responsibility_depth[certified] = (
+                                causal_posterior.depths[certified].to(
+                                    extra_responsibility_depth
+                                )
+                            )
+                            posterior_confidence = torch.clamp(
+                                1.0
+                                - causal_posterior.log_depth_stds[certified]
+                                / max(
+                                    float(
+                                        self.depth_cov_estimator.std_valid_threshold
+                                    ),
+                                    1.0e-8,
+                                ),
+                                0.0,
+                                1.0,
+                            )
+                            extra_depth_confidence[certified] = posterior_confidence
+                            extra_multiview_support[certified] = torch.maximum(
+                                extra_multiview_support[certified],
+                                causal_posterior.information_gain[certified].to(
+                                    extra_multiview_support
+                                ),
+                            )
+                            if depth_prior_fallback_pixel_indices is not None:
+                                certified_pixels = selected_pixels[certified]
+                                depth_prior_fallback_pixel_indices = (
+                                    depth_prior_fallback_pixel_indices[
+                                        ~torch.isin(
+                                            depth_prior_fallback_pixel_indices,
+                                            certified_pixels,
+                                        )
+                                    ]
+                                )
+                        self.causal_metric_birth.record_posterior(causal_posterior)
+                        causal_metric_batch = None
+
+                    extra_metric_identity = torch.zeros(
+                        len(extra_pts_depth), device=device, dtype=torch.bool
+                    )
+                    extra_exact_world = torch.full(
+                        (len(extra_pts_depth), 3),
+                        float("nan"),
+                        device=device,
+                        dtype=torch.float32,
+                    )
+                    if causal_metric_batch is not None and len(causal_metric_batch):
+                        footprint_reanchor = (
+                            self.causal_metric_birth_config["birth_mode"]
+                            == "footprint_reanchor"
+                        )
+                        dual_replace = self.causal_dual_responsibility_config[
+                            "enabled"
+                        ]
+                        replacement_positions = None
+                        assigned_tracks = None
+                        assigned_distances = None
+                        if dual_replace or footprint_reanchor:
+                            selected_pixels = (
+                                extra_pts_2d[:, 1].int() * w
+                                + extra_pts_2d[:, 0].int()
+                            )
+                            fallback_positions = torch.nonzero(
+                                torch.isin(
+                                    selected_pixels,
+                                    depth_prior_fallback_pixel_indices,
+                                ),
+                                as_tuple=False,
+                            ).reshape(-1)
+                            tracked_count = min(
+                                int(len(causal_metric_batch)),
+                                int(fallback_positions.numel()),
+                            )
+                            if tracked_count:
+                                tracked_uv_for_assignment = torch.from_numpy(
+                                    causal_metric_batch.uv[:tracked_count]
+                                ).to(device=device, dtype=torch.float32)
+                            if footprint_reanchor and tracked_count:
+                                support_radius = budgeted_fallback_radius(
+                                    (cam.get_width(level), cam.get_height(level)),
+                                    int(self.extra_pts_num),
+                                )
+                                (
+                                    replacement_positions,
+                                    assigned_tracks,
+                                    assigned_distances,
+                                ) = bind_tracks_to_proxy_slots(
+                                    extra_pts_2d,
+                                    fallback_positions,
+                                    tracked_uv_for_assignment,
+                                    support_radius_px=support_radius,
+                                )
+                                tracked_count = int(len(replacement_positions))
+                                self.causal_metric_birth.stats[
+                                    "reanchor_proxy_rows"
+                                ] += int(fallback_positions.numel())
+                            elif tracked_count:
+                                replacement_positions = (
+                                    nearest_unique_replacement_positions(
+                                        extra_pts_2d,
+                                        fallback_positions,
+                                        tracked_uv_for_assignment,
+                                    )
+                                )
+                        else:
+                            remaining_budget = max(
+                                0, int(extra_pts_num) - int(len(extra_pts_depth))
+                            )
+                            tracked_count = min(
+                                int(len(causal_metric_batch)), remaining_budget
+                            )
+                        if tracked_count:
+                            tracked_uv = torch.from_numpy(
+                                causal_metric_batch.uv[:tracked_count]
+                            ).to(device=device, dtype=torch.float32)
+                            tracked_depth = torch.from_numpy(
+                                causal_metric_batch.depths[:tracked_count]
+                            ).to(device=device, dtype=extra_pts_depth.dtype)
+                            tracked_world = torch.from_numpy(
+                                causal_metric_batch.world_points[:tracked_count]
+                            ).to(device=device, dtype=torch.float32)
+                            tracked_log_std = torch.from_numpy(
+                                causal_metric_batch.log_depth_stds[:tracked_count]
+                            ).to(device=device, dtype=torch.float32)
+                            tracked_information = torch.from_numpy(
+                                causal_metric_batch.information_gains[:tracked_count]
+                            ).to(device=device, dtype=torch.float32)
+                            if assigned_tracks is not None:
+                                tracked_uv = torch.from_numpy(
+                                    causal_metric_batch.uv
+                                ).to(device=device, dtype=torch.float32)[
+                                    assigned_tracks
+                                ]
+                                tracked_depth = torch.from_numpy(
+                                    causal_metric_batch.depths
+                                ).to(device=device, dtype=extra_pts_depth.dtype)[
+                                    assigned_tracks
+                                ]
+                                tracked_world = torch.from_numpy(
+                                    causal_metric_batch.world_points
+                                ).to(device=device, dtype=torch.float32)[
+                                    assigned_tracks
+                                ]
+                                tracked_log_std = torch.from_numpy(
+                                    causal_metric_batch.log_depth_stds
+                                ).to(device=device, dtype=torch.float32)[
+                                    assigned_tracks
+                                ]
+                                tracked_information = torch.from_numpy(
+                                    causal_metric_batch.information_gains
+                                ).to(device=device, dtype=torch.float32)[
+                                    assigned_tracks
+                                ]
+                            tracked_confidence = torch.clamp(
+                                1.0
+                                - tracked_log_std
+                                / max(
+                                    float(
+                                        self.depth_cov_estimator.std_valid_threshold
+                                    ),
+                                    1.0e-8,
+                                ),
+                                0.0,
+                                1.0,
+                            )
+                            if footprint_reanchor:
+                                old_depth = extra_pts_depth[
+                                    replacement_positions
+                                ].clone()
+                                extra_pts_depth[replacement_positions] = tracked_depth
+                                self.causal_metric_birth.record_reanchoring(
+                                    0,
+                                    old_depth,
+                                    tracked_depth,
+                                    assigned_distances,
+                                )
+                            elif dual_replace:
+                                extra_pts_2d[replacement_positions] = tracked_uv
+                                extra_pts_depth[replacement_positions] = tracked_depth
+                                extra_responsibility_depth[
+                                    replacement_positions
+                                ] = tracked_depth
+                                extra_depth_confidence[replacement_positions] = (
+                                    tracked_confidence
+                                )
+                                extra_multiview_support[replacement_positions] = (
+                                    tracked_information
+                                )
+                                extra_budget_primary[replacement_positions] = True
+                                extra_metric_identity[replacement_positions] = True
+                                extra_exact_world[replacement_positions] = tracked_world
+                                self.causal_dual_responsibility_stats.setdefault(
+                                    "tracked_proxy_replacements", 0
+                                )
+                                self.causal_dual_responsibility_stats[
+                                    "tracked_proxy_replacements"
+                                ] += int(tracked_count)
+                            else:
+                                extra_pts_2d = torch.cat(
+                                    (extra_pts_2d, tracked_uv), dim=0
+                                )
+                                extra_pts_depth = torch.cat(
+                                    (extra_pts_depth, tracked_depth), dim=0
+                                )
+                                extra_responsibility_depth = torch.cat(
+                                    (extra_responsibility_depth, tracked_depth), dim=0
+                                )
+                                extra_depth_confidence = torch.cat(
+                                    (extra_depth_confidence, tracked_confidence), dim=0
+                                )
+                                extra_multiview_support = torch.cat(
+                                    (extra_multiview_support, tracked_information), dim=0
+                                )
+                                extra_budget_primary = torch.cat(
+                                    (
+                                        extra_budget_primary,
+                                        torch.ones(
+                                            tracked_count,
+                                            device=device,
+                                            dtype=torch.bool,
+                                        ),
+                                    ),
+                                    dim=0,
+                                )
+                                extra_metric_identity = torch.cat(
+                                    (
+                                        extra_metric_identity,
+                                        torch.ones(
+                                            tracked_count,
+                                            device=device,
+                                            dtype=torch.bool,
+                                        ),
+                                    ),
+                                    dim=0,
+                                )
+                                extra_exact_world = torch.cat(
+                                    (extra_exact_world, tracked_world), dim=0
+                                )
+
                     # Uncomment this part if need to visualize feature points
                     # extra_pts_idx = extra_pts_2d[:, 1].int() * cam.get_width(level) + extra_pts_2d[:, 0].int()
                     # vis_feature_mask = sparse_depth.detach().cpu().numpy().reshape(-1)
@@ -4623,14 +7386,15 @@ class GaussianModel:
                         [pts_2d, extra_pts_2d], dim=0
                     )  # concat semi-dense pts with extra pts
                     pts_depth = torch.cat([pts_depth, extra_pts_depth], dim=0)
+                    responsibility_depth = torch.cat(
+                        [pts_depth[: len(pts_depth) - len(extra_pts_depth)],
+                         extra_responsibility_depth],
+                        dim=0,
+                    )
                     proposal_sparse_valid = torch.cat(
                         [
                             proposal_sparse_valid,
-                            torch.zeros(
-                                (len(extra_pts_depth),),
-                                device=device,
-                                dtype=torch.bool,
-                            ),
+                            extra_metric_identity,
                         ],
                         dim=0,
                     )
@@ -4639,6 +7403,12 @@ class GaussianModel:
                     )
                     proposal_multiview_support = torch.cat(
                         [proposal_multiview_support, extra_multiview_support], dim=0
+                    )
+                    proposal_budget_primary = torch.cat(
+                        [proposal_budget_primary, extra_budget_primary], dim=0
+                    )
+                    proposal_tracked_metric = torch.cat(
+                        [proposal_tracked_metric, extra_metric_identity], dim=0
                     )
                     proposal_track_ids = torch.cat(
                         [
@@ -4662,8 +7432,36 @@ class GaussianModel:
             pts_3d = unproject_pts_tensor(
                 pts_2d, pts_depth, cam.get_int_mat(level), cam.get_raw_pose().detach()
             )
+            if "responsibility_depth" not in locals():
+                responsibility_depth = pts_depth.clone()
+            responsibility_pts_3d = unproject_pts_tensor(
+                pts_2d,
+                responsibility_depth,
+                cam.get_int_mat(level),
+                cam.get_raw_pose().detach(),
+            )
             if exact_sparse_world is not None and sparse_count > 0:
                 pts_3d[:sparse_count] = exact_sparse_world
+                responsibility_pts_3d[:sparse_count] = exact_sparse_world
+                self.frontview_far_field_stats["exact_sparse_world_rows"] += int(
+                    sparse_count
+                )
+            if (
+                "extra_metric_identity" in locals()
+                and len(extra_metric_identity)
+                and bool(extra_metric_identity.any().item())
+            ):
+                dense_world = pts_3d[sparse_count:]
+                dense_world[extra_metric_identity] = extra_exact_world[
+                    extra_metric_identity
+                ].to(device=dense_world.device, dtype=dense_world.dtype)
+                dense_responsibility_world = responsibility_pts_3d[sparse_count:]
+                dense_responsibility_world[extra_metric_identity] = extra_exact_world[
+                    extra_metric_identity
+                ].to(
+                    device=dense_responsibility_world.device,
+                    dtype=dense_responsibility_world.dtype,
+                )
 
             color_img = cam.get_gt_image(level)
 
@@ -4706,10 +7504,10 @@ class GaussianModel:
                 proposal_stable_depth = torch.full_like(pts_depth, float("nan"))
             else:
                 residual_scores = render_pkg["diff"].reshape(-1)[pts_2d_index]
-                proposal_stable_depth = render_pkg["depth"].reshape(-1)[
+                proposal_stable_depth = self._geometry_depth(render_pkg).reshape(-1)[
                     pts_2d_index
                 ]
-                opacity = render_pkg.get("opacity")
+                opacity = self._geometry_opacity(render_pkg)
                 if opacity is None:
                     coverage_scores = torch.ones_like(pts_depth)
                 else:
@@ -4721,6 +7519,36 @@ class GaussianModel:
                 ).reshape(-1, 1)
                 + self.init_scale_offset
             )
+            responsibility_init_scale = (
+                torch.log(
+                    0.5
+                    * responsibility_depth
+                    / ((cam.get_fx(level) + cam.get_fy(level)) / 2.0)
+                ).reshape(-1, 1)
+                + self.init_scale_offset
+            )
+            tracked_support_pixels = None
+            if (
+                self.causal_metric_birth.enabled
+                and self.causal_metric_birth_config["support_mode"] != "point"
+                and bool(proposal_tracked_metric.any().item())
+            ):
+                tracked_support_pixels = budgeted_fallback_radius(
+                    (cam.get_width(level), cam.get_height(level)),
+                    int(self.extra_pts_num),
+                )
+                tracked_rows = proposal_tracked_metric
+                init_scale[tracked_rows, 0] = torch.log(
+                    pts_depth[tracked_rows]
+                    * float(tracked_support_pixels)
+                    / (0.5 * (cam.get_fx(level) + cam.get_fy(level)))
+                )
+                responsibility_init_scale[tracked_rows, 0] = torch.log(
+                    responsibility_depth[tracked_rows]
+                    * float(tracked_support_pixels)
+                    / (0.5 * (cam.get_fx(level) + cam.get_fy(level)))
+                )
+            fallback_scale_rows = torch.zeros_like(pts_depth, dtype=torch.bool)
             if depth_prior_fallback_pixel_indices is not None:
                 all_pixel_indices = (
                     pts_2d[:, 1].int() * cam.get_width(level) + pts_2d[:, 0].int()
@@ -4728,7 +7556,15 @@ class GaussianModel:
                 fallback_scale_rows = torch.isin(
                     all_pixel_indices, depth_prior_fallback_pixel_indices
                 )
+                fallback_scale_rows &= ~proposal_tracked_metric
                 init_scale[fallback_scale_rows] += math.log(
+                    float(
+                        self.frontview_coverage_recovery_config[
+                            "depth_fallback_scale_multiplier"
+                        ]
+                    )
+                )
+                responsibility_init_scale[fallback_scale_rows] += math.log(
                     float(
                         self.frontview_coverage_recovery_config[
                             "depth_fallback_scale_multiplier"
@@ -4738,25 +7574,222 @@ class GaussianModel:
                 self.frontview_coverage_depth_stats[
                     "depth_fallback_scaled_rows"
                 ] += int(fallback_scale_rows.sum().item())
+            fallback_support_mode = self.frontview_far_field_config[
+                "fallback_support_mode"
+            ]
+            if fallback_support_mode != "legacy" and bool(
+                fallback_scale_rows.any().item()
+            ):
+                support_pixels = budgeted_fallback_radius(
+                    (cam.get_width(level), cam.get_height(level)),
+                    int(self.extra_pts_num),
+                )
+                fallback_depth = pts_depth[fallback_scale_rows]
+                replacement = torch.log(
+                    fallback_depth
+                    * float(support_pixels)
+                    / (0.5 * (cam.get_fx(level) + cam.get_fy(level)))
+                )
+                if fallback_support_mode.startswith("budget_information"):
+                    radius_factors, density = (
+                        budget_normalized_information_radii(
+                            cam.get_gt_image(level),
+                            pts_2d.detach().cpu().numpy(),
+                            fallback_scale_rows.detach().cpu().numpy(),
+                            support_pixels,
+                            shuffle=fallback_support_mode.endswith("_shuffled"),
+                            seed=int(self.frontview_far_field_config["shuffle_seed"])
+                            + int(cam.cam_idx),
+                        )
+                    )
+                    row_factors = torch.as_tensor(
+                        radius_factors[fallback_scale_rows.detach().cpu().numpy()],
+                        device=replacement.device,
+                        dtype=replacement.dtype,
+                    )
+                    replacement += torch.log(row_factors)
+                    values = radius_factors[
+                        fallback_scale_rows.detach().cpu().numpy()
+                    ]
+                    density_values = density[
+                        fallback_scale_rows.detach().cpu().numpy()
+                    ]
+                    stats = self.frontview_far_field_stats
+                    stats["fallback_information_rows"] += int(len(values))
+                    stats["fallback_information_radius_factor_sum"] += float(
+                        np.sum(values)
+                    )
+                    stats["fallback_information_density_sum"] += float(
+                        np.sum(density_values)
+                    )
+                    minimum = float(np.min(values))
+                    maximum = float(np.max(values))
+                    old_min = stats["fallback_information_radius_factor_min"]
+                    old_max = stats["fallback_information_radius_factor_max"]
+                    stats["fallback_information_radius_factor_min"] = (
+                        minimum if old_min is None else min(old_min, minimum)
+                    )
+                    stats["fallback_information_radius_factor_max"] = (
+                        maximum if old_max is None else max(old_max, maximum)
+                    )
+                    stats["fallback_information_shuffled_calls"] += int(
+                        fallback_support_mode.endswith("_shuffled")
+                    )
+                init_scale[fallback_scale_rows, 0] = replacement
+                responsibility_replacement = torch.log(
+                    responsibility_depth[fallback_scale_rows]
+                    * float(support_pixels)
+                    / (0.5 * (cam.get_fx(level) + cam.get_fy(level)))
+                )
+                if fallback_support_mode.startswith("budget_information"):
+                    responsibility_replacement += torch.log(row_factors)
+                responsibility_init_scale[
+                    fallback_scale_rows, 0
+                ] = responsibility_replacement
             proposal_frequency_scores = torch.zeros_like(pts_depth)
             if admission_evidence is not None:
                 proposal_frequency_scores = admission_evidence.reshape(-1)[
                     pts_2d_index
                 ]
             if footprint_evidence is not None:
-                init_scale = init_scale + frequency_footprint_log_offset(
+                footprint_log_offset = frequency_footprint_log_offset(
                     footprint_evidence.reshape(-1)[pts_2d_index],
                     self.frequency_sampling_config.get(
                         "max_footprint_shrink_fraction", 0.0
                     ),
                 ).reshape(-1, 1)
+                init_scale = init_scale + footprint_log_offset
+                responsibility_init_scale = (
+                    responsibility_init_scale + footprint_log_offset
+                )
             cur_view_scale_size = cam.get_view_size(level)
 
+            proposal_cidec_certified = torch.zeros_like(
+                proposal_sparse_valid, dtype=torch.bool
+            )
+            proposal_cidec_conflicted = torch.zeros_like(
+                proposal_sparse_valid, dtype=torch.bool
+            )
+            proposal_cidec_reject = torch.zeros_like(
+                proposal_sparse_valid, dtype=torch.bool
+            )
+            proposal_cidec_log_stds = float(
+                self.depth_cov_estimator.std_valid_threshold
+            ) * (1.0 - torch.clamp(proposal_depth_confidence, 0.0, 1.0))
+            if self.frontview_inverse_depth_certificate_config["enabled"]:
+                dense_rows = torch.nonzero(
+                    ~proposal_sparse_valid, as_tuple=False
+                ).flatten()
+                if dense_rows.numel():
+                    threshold = float(self.depth_cov_estimator.std_valid_threshold)
+                    prior_log_stds = threshold * (
+                        1.0
+                        - torch.clamp(
+                            proposal_depth_confidence[dense_rows], 0.0, 1.0
+                        )
+                    )
+                    prior_depths = pts_depth[dense_rows].clone()
+                    certificate = causal_inverse_depth_posterior(
+                        cam,
+                        list(reference_cameras or ()),
+                        pts_2d[dense_rows],
+                        prior_depths,
+                        prior_log_stds,
+                        level,
+                        self.frontview_inverse_depth_certificate_config,
+                    )
+                    certified = certificate["certified"]
+                    conflicted = certificate["conflicted"]
+                    proposal_cidec_certified[dense_rows] = certified
+                    proposal_cidec_conflicted[dense_rows] = conflicted
+                    proposal_cidec_log_stds[dense_rows] = certificate[
+                        "posterior_log_stds"
+                    ]
+                    policy = self.frontview_inverse_depth_certificate_config[
+                        "uncertified_policy"
+                    ]
+                    if policy == "reject":
+                        proposal_cidec_reject[dense_rows] = ~certified
+                    elif policy == "projective_reject_conflict":
+                        proposal_cidec_reject[dense_rows] = conflicted & ~certified
+
+                    corrected_depths = certificate["depths"]
+                    pts_depth[dense_rows] = corrected_depths
+                    depth_ratio = corrected_depths / torch.clamp(
+                        prior_depths, min=1.0e-8
+                    )
+                    init_scale[dense_rows] += torch.log(depth_ratio).reshape(-1, 1)
+                    pts_3d[dense_rows] = unproject_pts_tensor(
+                        pts_2d[dense_rows],
+                        corrected_depths,
+                        cam.get_int_mat(level),
+                        cam.get_raw_pose().detach(),
+                    )
+                    posterior_confidence = torch.clamp(
+                        1.0
+                        - certificate["posterior_log_stds"]
+                        / max(threshold, 1.0e-8),
+                        0.0,
+                        1.0,
+                    )
+                    proposal_depth_confidence[dense_rows] = torch.where(
+                        certified,
+                        posterior_confidence,
+                        proposal_depth_confidence[dense_rows],
+                    )
+                    proposal_multiview_support[dense_rows] = torch.maximum(
+                        proposal_multiview_support[dense_rows],
+                        certificate["information_gain"],
+                    )
+                    stats = self.frontview_inverse_depth_certificate_stats
+                    stats["calls"] += 1
+                    stats["rows"] += int(dense_rows.numel())
+                    stats["certified_rows"] += int(certified.sum().item())
+                    stats["conflicted_rows"] += int(conflicted.sum().item())
+                    stats["rejected_conflicted_rows"] += int(
+                        proposal_cidec_reject[dense_rows].sum().item()
+                    )
+                    stats["information_gain_sum"] += float(
+                        certificate["information_gain"].sum().item()
+                    )
+                    stats["absolute_log_depth_shift_sum"] += float(
+                        torch.abs(certificate["posterior_shift"][certified]).sum().item()
+                    )
+                    stats["posterior_log_std_sum"] += float(
+                        certificate["posterior_log_stds"][certified].sum().item()
+                    )
+                    stats["valid_view_sum"] += int(
+                        certificate["valid_views"].sum().item()
+                    )
+                    stats["baseline_information_sum"] += float(
+                        certificate["baseline_information"].sum().item()
+                    )
+                    stats["shuffle_calls"] += int(
+                        self.frontview_inverse_depth_certificate_config[
+                            "shuffle_evidence"
+                        ]
+                    )
+
+            use_original_responsibility = (
+                self.causal_landmark_memory.uses_original_posterior_responsibility
+            )
+            if not use_original_responsibility:
+                responsibility_depth = pts_depth
+                responsibility_pts_3d = pts_3d
+                responsibility_init_scale = init_scale
             pts_3d = pts_3d.cpu().numpy()
+            responsibility_pts_3d = responsibility_pts_3d.cpu().numpy()
             pts_color = pts_color.cpu().numpy()
             init_scale = init_scale.cpu().numpy()
+            responsibility_init_scale = responsibility_init_scale.cpu().numpy()
             pts_2d = pts_2d.detach().cpu().numpy().astype(np.float32, copy=False)
             pts_depth = pts_depth.detach().cpu().numpy().astype(np.float32, copy=False)
+            responsibility_depth = (
+                responsibility_depth.detach()
+                .cpu()
+                .numpy()
+                .astype(np.float32, copy=False)
+            )
             residual_scores = (
                 residual_scores.detach().cpu().numpy().astype(np.float32, copy=False)
             )
@@ -4779,6 +7812,27 @@ class GaussianModel:
             proposal_track_ids = proposal_track_ids.detach().cpu().numpy().astype(
                 np.int64
             )
+            proposal_budget_primary = (
+                proposal_budget_primary.detach().cpu().numpy().astype(np.bool_)
+            )
+            proposal_tracked_metric = (
+                proposal_tracked_metric.detach().cpu().numpy().astype(np.bool_)
+            )
+            proposal_depth_fallback = (
+                fallback_scale_rows.detach().cpu().numpy().astype(np.bool_)
+            )
+            proposal_cidec_certified = (
+                proposal_cidec_certified.detach().cpu().numpy().astype(np.bool_)
+            )
+            proposal_cidec_conflicted = (
+                proposal_cidec_conflicted.detach().cpu().numpy().astype(np.bool_)
+            )
+            proposal_cidec_reject = (
+                proposal_cidec_reject.detach().cpu().numpy().astype(np.bool_)
+            )
+            proposal_cidec_log_stds = (
+                proposal_cidec_log_stds.detach().cpu().numpy().astype(np.float32)
+            )
             fusion_track_ids = (
                 fusion_track_ids.detach().cpu().numpy().astype(np.int64)
             )
@@ -4798,7 +7852,19 @@ class GaussianModel:
             cur_view_scale_size,
             proposal_sparse_valid,
             int(cam.cam_idx),
+            gaussian_scales=np.exp(init_scale[:, 0]),
         )
+        proposal_responsibility_cover_sizes = proposal_cover_sizes
+        if use_original_responsibility:
+            proposal_responsibility_cover_sizes = self.frontview_scale_cover.candidate_target_sizes(
+                responsibility_depth,
+                (cam.get_fx(level) + cam.get_fy(level)) / 2.0,
+                self.camera_scale_rescalar,
+                cur_view_scale_size,
+                proposal_sparse_valid,
+                int(cam.cam_idx),
+                gaussian_scales=np.exp(responsibility_init_scale[:, 0]),
+            )
         camera_pose = cam.get_pose().detach()
         birth_camera_center = (
             -camera_pose[:3, :3].T @ camera_pose[:3, 3]
@@ -4812,6 +7878,18 @@ class GaussianModel:
                 int(cam.cam_idx),
             )
         )
+        proposal_responsibility_view_directions = proposal_view_directions
+        if use_original_responsibility:
+            proposal_responsibility_view_directions = self.frontview_scale_cover.candidate_view_directions(
+                responsibility_pts_3d,
+                birth_camera_center,
+                responsibility_depth,
+                proposal_sparse_valid,
+                int(cam.cam_idx),
+            )
+        self.causal_landmark_memory.record_responsibility_coordinates(
+            pts_depth, responsibility_depth
+        )
 
         self.fuse_frontview_track_appearance(
             fusion_track_ids,
@@ -4821,7 +7899,283 @@ class GaussianModel:
         )
 
         before_filter_num = pts_3d.shape[0]
+        posterior_refill_requested = 0
         proposal_far_field = np.zeros((before_filter_num,), dtype=np.bool_)
+        focal_pixels = 0.5 * (cam.get_fx(level) + cam.get_fy(level))
+        proposal_projected_radii = projected_gaussian_radii(
+            init_scale, pts_depth, focal_pixels
+        )
+        proposal_responsibility_projected_radii = proposal_projected_radii
+        if use_original_responsibility:
+            proposal_responsibility_projected_radii = projected_gaussian_radii(
+                responsibility_init_scale, responsibility_depth, focal_pixels
+            )
+        proposal_log_depth_stds = proposal_cidec_log_stds
+        proposal_parallax_pixels = np.zeros((before_filter_num,), dtype=np.float32)
+        proposal_parallax_support = np.zeros((before_filter_num,), dtype=np.int32)
+        proposal_responsibility_parallax_pixels = proposal_parallax_pixels
+        proposal_responsibility_parallax_support = proposal_parallax_support
+        proposal_map_redundant = np.zeros((before_filter_num,), dtype=np.bool_)
+        proposal_map_log_odds = np.full(
+            (before_filter_num,), -np.inf, dtype=np.float64
+        )
+        proposal_radial_scale_factors = np.ones(
+            (before_filter_num,), dtype=np.float32
+        )
+        proposal_covariance_scale_factors = np.ones(
+            (before_filter_num, 3), dtype=np.float32
+        )
+        proposal_initial_quaternions = np.zeros(
+            (before_filter_num, 4), dtype=np.float32
+        )
+        proposal_initial_quaternions[:, 0] = 1.0
+        proposal_scale_expansion_limits = np.full(
+            (before_filter_num,), np.inf, dtype=np.float32
+        )
+        proposal_footprint_target_scales = np.full(
+            (before_filter_num,), np.inf, dtype=np.float32
+        )
+        if (
+            self.causal_metric_birth.enabled
+            and self.causal_metric_birth_config["support_mode"]
+            == "budget_structure"
+            and np.any(proposal_tracked_metric)
+        ):
+            (
+                tracked_factors,
+                tracked_quaternions,
+                _,
+            ) = structure_aligned_covariances(
+                cam.get_gt_image(level),
+                pts_2d,
+                proposal_view_directions,
+                cam.get_raw_pose().detach().cpu().numpy()[:3, :3],
+                proposal_tracked_metric,
+                support_radius_pixels=float(tracked_support_pixels),
+                certificate_strength=np.clip(
+                    proposal_depth_confidence, 0.0, 1.0
+                ),
+                shuffle=False,
+                seed=int(self.causal_metric_birth_config["shuffle_seed"])
+                + int(cam.cam_idx),
+            )
+            # Tangential support follows the per-frame birth budget. Radial
+            # sigma follows propagated metric depth uncertainty: sigma_z=z*sigma_logz.
+            radial_ratio = (
+                proposal_cidec_log_stds
+                * float(0.5 * (cam.get_fx(level) + cam.get_fy(level)))
+                / max(float(tracked_support_pixels), 1.0e-8)
+            )
+            tracked_factors[proposal_tracked_metric, 2] = np.maximum(
+                radial_ratio[proposal_tracked_metric],
+                np.finfo(np.float32).tiny,
+            )
+            proposal_covariance_scale_factors[proposal_tracked_metric] = (
+                tracked_factors[proposal_tracked_metric]
+            )
+            proposal_initial_quaternions[proposal_tracked_metric] = (
+                tracked_quaternions[proposal_tracked_metric]
+            )
+        if (
+            self._frontview_far_field_enabled()
+            and self.frontview_far_field_config["routing_mode"]
+            in ("causal_observability", "adaptive_observability")
+        ):
+            references = list(reference_cameras or ())
+            proposal_parallax_pixels, proposal_parallax_support = (
+                visible_parallax_pixels(
+                    pts_3d,
+                    cam.get_raw_pose().detach().cpu().numpy(),
+                    [
+                        reference.get_raw_pose().detach().cpu().numpy()
+                        for reference in references
+                    ],
+                    [
+                        reference.get_int_mat(level).detach().cpu().numpy()
+                        for reference in references
+                    ],
+                    [
+                        (reference.get_width(level), reference.get_height(level))
+                        for reference in references
+                    ],
+                    focal_pixels,
+                )
+            )
+            if not use_original_responsibility:
+                proposal_responsibility_parallax_pixels = (
+                    proposal_parallax_pixels
+                )
+                proposal_responsibility_parallax_support = (
+                    proposal_parallax_support
+                )
+            else:
+                (
+                    proposal_responsibility_parallax_pixels,
+                    proposal_responsibility_parallax_support,
+                ) = visible_parallax_pixels(
+                    responsibility_pts_3d,
+                    cam.get_raw_pose().detach().cpu().numpy(),
+                    [
+                        reference.get_raw_pose().detach().cpu().numpy()
+                        for reference in references
+                    ],
+                    [
+                        reference.get_int_mat(level).detach().cpu().numpy()
+                        for reference in references
+                    ],
+                    [
+                        (reference.get_width(level), reference.get_height(level))
+                        for reference in references
+                    ],
+                    focal_pixels,
+                )
+            footprint_mode = self.frontview_far_field_config[
+                "footprint_trust_mode"
+            ]
+            if footprint_mode != "disabled":
+                footprint_scope = self.frontview_far_field_config[
+                    "footprint_trust_scope"
+                ]
+                footprint_eligible = ~proposal_sparse_valid
+                if footprint_scope == "projective_responsibility":
+                    footprint_eligible = far_field_responsibility_mask(
+                        responsibility_depth,
+                        proposal_sparse_valid,
+                        proposal_track_ids,
+                        self.frontview_far_field_config,
+                        parallax_pixels=proposal_responsibility_parallax_pixels,
+                        projected_radii=proposal_responsibility_projected_radii,
+                        log_depth_stds=proposal_log_depth_stds,
+                    )
+                footprint_projective_owner = None
+                if footprint_mode.startswith((
+                    "certificate_owner_area",
+                    "certificate_residual_rd",
+                )):
+                    footprint_projective_owner = far_field_responsibility_mask(
+                        responsibility_depth,
+                        proposal_sparse_valid,
+                        proposal_track_ids,
+                        self.frontview_far_field_config,
+                        parallax_pixels=proposal_responsibility_parallax_pixels,
+                        projected_radii=proposal_responsibility_projected_radii,
+                        log_depth_stds=proposal_log_depth_stds,
+                    )
+                footprint_radius_factors = None
+                if footprint_mode.startswith("certificate_residual_rd"):
+                    if render_pkg is None:
+                        footprint_radius_factors = np.ones(
+                            (before_filter_num,), dtype=np.float32
+                        )
+                    else:
+                        radius_factors = residual_rate_distortion_radius_factors(
+                            render_pkg["diff"],
+                            torch.as_tensor(
+                                pts_2d, device=self.device, dtype=torch.float32
+                            ),
+                            torch.as_tensor(
+                                footprint_projective_owner,
+                                device=self.device,
+                                dtype=torch.bool,
+                            ),
+                            image_size=(
+                                cam.get_width(level),
+                                cam.get_height(level),
+                            ),
+                            budget=int(self.extra_pts_num),
+                            pool_multiplier=int(
+                                self.frontview_sampling_config.get(
+                                    "pool_multiplier", 1
+                                )
+                            ),
+                            visibility=(
+                                render_pkg.get("opacity")
+                                if "_visible" in footprint_mode
+                                else None
+                            ),
+                            detail_protection="_detail" in footprint_mode,
+                        )
+                        footprint_radius_factors = (
+                            radius_factors.detach().cpu().numpy().astype(np.float32)
+                        )
+                (
+                    proposal_scale_expansion_limits,
+                    footprint_information,
+                    footprint_metadata,
+                ) = observability_footprint_trust_limits(
+                    proposal_parallax_pixels,
+                    proposal_projected_radii,
+                    proposal_log_depth_stds,
+                    pts_depth,
+                    footprint_eligible,
+                    (cam.get_width(level), cam.get_height(level)),
+                    int(self.extra_pts_num),
+                    int(self.frontview_sampling_config.get("pool_multiplier", 1)),
+                    mode=footprint_mode,
+                    projective_owner=(
+                        footprint_projective_owner
+                        if footprint_mode.startswith("certificate_owner_area")
+                        else None
+                    ),
+                    responsibility_radius_factors=footprint_radius_factors,
+                    seed=int(self.frontview_far_field_config["shuffle_seed"])
+                    + int(cam.cam_idx),
+                )
+                eligible_rows = footprint_eligible
+                bounded_rows = np.isfinite(proposal_scale_expansion_limits)
+                stats = self.frontview_far_field_stats
+                stats["footprint_trust_calls"] += 1
+                stats["footprint_trust_rows"] += int(np.sum(eligible_rows))
+                stats["footprint_trust_bounded_rows"] += int(
+                    np.sum(bounded_rows)
+                )
+                stats["footprint_trust_information_sum"] += float(
+                    np.sum(footprint_information[eligible_rows])
+                )
+                stats["footprint_trust_limit_sum"] += float(
+                    np.sum(
+                        proposal_scale_expansion_limits[bounded_rows],
+                        dtype=np.float64,
+                    )
+                )
+                if footprint_metadata["cell_px"] is not None:
+                    stats["footprint_trust_cell_pixel_sum"] += float(
+                        footprint_metadata["cell_px"]
+                    )
+                stats["footprint_trust_shuffled_calls"] += int(
+                    footprint_metadata["shuffled"]
+                )
+                stats["footprint_trust_projective_scope_calls"] += int(
+                    footprint_scope == "projective_responsibility"
+                )
+                stats["footprint_trust_owner_area_calls"] += int(
+                    footprint_projective_owner is not None
+                )
+                stats["footprint_trust_owner_area_rows"] += int(
+                    footprint_metadata["projective_owner_rows"]
+                )
+                residual_rd_rows = (
+                    0
+                    if footprint_projective_owner is None
+                    or not footprint_mode.startswith("certificate_residual_rd")
+                    else int(np.count_nonzero(footprint_projective_owner))
+                )
+                stats["footprint_trust_residual_rd_calls"] += int(
+                    footprint_mode.startswith("certificate_residual_rd")
+                )
+                stats["footprint_trust_residual_rd_rows"] += residual_rd_rows
+                if residual_rd_rows:
+                    stats["footprint_trust_residual_rd_radius_sum"] += float(
+                        np.sum(
+                            footprint_radius_factors[footprint_projective_owner],
+                            dtype=np.float64,
+                        )
+                    )
+                bounded = np.isfinite(proposal_scale_expansion_limits)
+                proposal_footprint_target_scales[bounded] = (
+                    np.exp(init_scale[bounded, 0])
+                    * proposal_scale_expansion_limits[bounded]
+                ).astype(np.float32, copy=False)
         responsibility_parent_uids = np.full(
             (before_filter_num,), -1, dtype=np.int64
         )
@@ -4836,7 +8190,7 @@ class GaussianModel:
             rendered_image = (
                 torch.zeros_like(target_image)
                 if render_pkg is None
-                else render_pkg["render"]
+                else geometry_decision_render(render_pkg)
             )
             map_depth = (
                 torch.full(
@@ -4846,7 +8200,7 @@ class GaussianModel:
                     dtype=target_image.dtype,
                 )
                 if render_pkg is None
-                else render_pkg["depth"]
+                else self._geometry_depth(render_pkg)
             )
             map_opacity = (
                 torch.zeros(
@@ -4855,7 +8209,7 @@ class GaussianModel:
                     dtype=target_image.dtype,
                 )
                 if render_pkg is None
-                else render_pkg["opacity"]
+                else self._geometry_opacity(render_pkg)
             )
             keep_indices = self.frontview_residual_cover.filter_candidates(
                 frame_id=int(cam.cam_idx),
@@ -4977,23 +8331,268 @@ class GaussianModel:
             or self._frontview_scale_cover_enabled()
         ):
             if self._frontview_far_field_enabled():
-                proposal_far_field = (~proposal_sparse_valid) & (
-                    pts_depth >= float(self.frontview_far_field_config["depth_m"])
+                proposal_far_field, adaptive_route_metadata = (
+                    far_field_responsibility_mask(
+                        responsibility_depth,
+                        proposal_sparse_valid,
+                        proposal_track_ids,
+                        self.frontview_far_field_config,
+                        parallax_pixels=proposal_responsibility_parallax_pixels,
+                        projected_radii=proposal_responsibility_projected_radii,
+                        log_depth_stds=proposal_log_depth_stds,
+                        return_metadata=True,
+                    )
                 )
+                if self.frontview_inverse_depth_certificate_config["enabled"]:
+                    dense = ~proposal_sparse_valid
+                    policy = self.frontview_inverse_depth_certificate_config[
+                        "uncertified_policy"
+                    ]
+                    proposal_far_field[dense & proposal_cidec_certified] = False
+                    if policy in ("projective", "projective_reject_conflict"):
+                        proposal_far_field[dense & ~proposal_cidec_certified] = True
+                    self.frontview_inverse_depth_certificate_stats[
+                        "projective_uncertified_rows"
+                    ] += int(np.sum(dense & ~proposal_cidec_certified))
+                if (
+                    self.frontview_far_field_config["routing_mode"]
+                    in ("causal_observability", "adaptive_observability")
+                ):
+                    dense = ~proposal_sparse_valid
+                    stats = self.frontview_far_field_stats
+                    stats["causal_route_calls"] += 1
+                    stats["causal_route_rows"] += int(before_filter_num)
+                    stats["causal_visible_rows"] += int(
+                        np.sum(proposal_responsibility_parallax_support > 0)
+                    )
+                    stats["causal_projective_rows"] += int(
+                        np.sum(proposal_far_field)
+                    )
+                    stats["causal_metric_depthcov_rows"] += int(
+                        np.sum(dense & ~proposal_far_field)
+                    )
+                    stats["causal_parallax_pixel_sum"] += float(
+                        np.sum(proposal_responsibility_parallax_pixels)
+                    )
+                    stats["causal_support_pixel_sum"] += float(
+                        np.sum(proposal_responsibility_projected_radii)
+                    )
+                    stats["causal_log_depth_std_sum"] += float(
+                        np.sum(proposal_log_depth_stds)
+                    )
+                    if adaptive_route_metadata is not None:
+                        boundaries = adaptive_route_metadata["boundaries_m"]
+                        stats["adaptive_route_calls"] += 1
+                        stats["adaptive_route_far_rows"] += int(
+                            adaptive_route_metadata["far_rows"]
+                        )
+                        stats["adaptive_route_iterations"] += int(
+                            adaptive_route_metadata["iterations"]
+                        )
+                        stats["adaptive_route_objective_sum"] += float(
+                            adaptive_route_metadata["objective"]
+                        )
+                        stats["adaptive_route_boundary_sum_m"] = [
+                            old + new
+                            for old, new in zip(
+                                stats["adaptive_route_boundary_sum_m"], boundaries
+                            )
+                        ]
+                        stats["adaptive_route_regime_counts"] = [
+                            old + new
+                            for old, new in zip(
+                                stats["adaptive_route_regime_counts"],
+                                adaptive_route_metadata["regime_counts"],
+                            )
+                        ]
+                        stats["last_adaptive_route_boundaries_m"] = boundaries
+                    proposal_radial_scale_factors = (
+                        projective_radial_scale_factors(
+                            proposal_parallax_pixels,
+                            proposal_projected_radii,
+                            proposal_log_depth_stds,
+                            proposal_far_field,
+                            mode=self.frontview_far_field_config[
+                                "projective_covariance_mode"
+                            ],
+                            seed=int(self.frontview_far_field_config["shuffle_seed"])
+                            + int(cam.cam_idx),
+                        )
+                    )
+                support_mode = self.frontview_far_field_config[
+                    "fallback_support_mode"
+                ]
+                fallback_projective = proposal_depth_fallback & proposal_far_field
+                if support_mode != "legacy" and np.any(fallback_projective):
+                    stats = self.frontview_far_field_stats
+                    stats["fallback_support_rows"] += int(
+                        np.sum(fallback_projective)
+                    )
+                    if "structure" in support_mode:
+                        certificate_mode = support_mode.startswith(
+                            "budget_certificate_structure"
+                        )
+                        certificate_strength = None
+                        support_radius_pixels = None
+                        if certificate_mode:
+                            parallax_margin = np.divide(
+                                proposal_parallax_pixels,
+                                proposal_projected_radii,
+                                out=np.zeros_like(proposal_parallax_pixels),
+                                where=proposal_projected_radii > 0.0,
+                            )
+                            precision_denom = (
+                                proposal_parallax_pixels * proposal_log_depth_stds
+                            )
+                            precision_margin = np.divide(
+                                proposal_projected_radii,
+                                precision_denom,
+                                out=np.ones_like(proposal_projected_radii),
+                                where=precision_denom > 0.0,
+                            )
+                            certificate_information = np.clip(
+                                np.minimum(parallax_margin, precision_margin),
+                                0.0,
+                                1.0,
+                            )
+                            certificate_strength = 1.0 - certificate_information
+                            support_radius_pixels = budgeted_fallback_radius(
+                                (cam.get_width(level), cam.get_height(level)),
+                                int(self.extra_pts_num),
+                            )
+                        (
+                            proposal_covariance_scale_factors,
+                            proposal_initial_quaternions,
+                            anisotropy,
+                        ) = structure_aligned_covariances(
+                            cam.get_gt_image(level),
+                            pts_2d,
+                            proposal_view_directions,
+                            cam.get_raw_pose()[:3, :3].detach().cpu().numpy(),
+                            fallback_projective,
+                            support_radius_pixels=support_radius_pixels,
+                            certificate_strength=certificate_strength,
+                            shuffle=support_mode.endswith("_shuffled"),
+                            seed=int(self.frontview_far_field_config["shuffle_seed"])
+                            + int(cam.cam_idx),
+                        )
+                        values = anisotropy[fallback_projective]
+                        stats["fallback_structure_rows"] += int(len(values))
+                        stats["fallback_anisotropy_sum"] += float(np.sum(values))
+                        maximum = float(np.max(values))
+                        stats["fallback_anisotropy_max"] = (
+                            maximum
+                            if stats["fallback_anisotropy_max"] is None
+                            else max(stats["fallback_anisotropy_max"], maximum)
+                        )
+                if (
+                    self.frontview_far_field_config["responsibility_basis"]
+                    == "persistent_identity"
+                ):
+                    has_identity = proposal_track_ids >= 0
+                    self.frontview_far_field_stats["identity_route_calls"] += 1
+                    self.frontview_far_field_stats["identity_route_rows"] += int(
+                        before_filter_num
+                    )
+                    self.frontview_far_field_stats[
+                        "persistent_identity_rows"
+                    ] += int(np.sum(has_identity))
+                    self.frontview_far_field_stats[
+                        "sparse_missing_identity_rows"
+                    ] += int(np.sum(proposal_sparse_valid & ~has_identity))
+                    self.frontview_far_field_stats[
+                        "identity_far_field_rows"
+                    ] += int(np.sum(proposal_far_field))
             if self._frontview_far_field_enabled() and bool(
                 self.frontview_far_field_config["shuffle_responsibility"]
             ):
-                depthcov_positions = np.flatnonzero(~proposal_sparse_valid)
                 far_count = int(np.sum(proposal_far_field))
-                proposal_far_field[:] = False
-                if far_count:
-                    rng = np.random.default_rng(
-                        int(self.frontview_far_field_config["shuffle_seed"])
-                        + int(cam.cam_idx)
+                proposal_far_field = matched_responsibility_shuffle(
+                    proposal_far_field,
+                    ~proposal_sparse_valid,
+                    responsibility_depth,
+                    int(self.frontview_far_field_config["shuffle_seed"])
+                    + int(cam.cam_idx),
+                    mode=self.frontview_far_field_config[
+                        "responsibility_shuffle_mode"
+                    ],
+                )
+                self.frontview_far_field_stats["responsibility_shuffle_calls"] += 1
+                self.frontview_far_field_stats["responsibility_shuffled_rows"] += (
+                    far_count
+                )
+            if (
+                self._frontview_far_field_enabled()
+                and self.frontview_far_field_config["map_redundancy_gate"]
+            ):
+                map_evidence = self.frontview_far_field_config[
+                    "map_redundancy_evidence"
+                ]
+                map_residuals = None
+                map_residual_scale = None
+                photometric_available = (
+                    map_evidence != "geometry" and render_pkg is not None
+                )
+                if photometric_available:
+                    rendered_diff = render_pkg["diff"].reshape(-1)
+                    rendered_opacity = render_pkg["opacity"].reshape(-1)
+                    weights = torch.clamp(rendered_opacity, 0.0, 1.0)
+                    map_residual_scale = float(
+                        torch.sqrt(
+                            torch.sum(weights * rendered_diff.square())
+                            / torch.clamp_min(
+                                torch.sum(weights),
+                                torch.finfo(rendered_diff.dtype).eps,
+                            )
+                        ).item()
                     )
-                    proposal_far_field[
-                        rng.choice(depthcov_positions, size=far_count, replace=False)
-                    ] = True
+                    map_residual_scale = max(
+                        map_residual_scale, np.finfo(np.float32).eps
+                    )
+                    map_residuals = residual_scores.copy()
+                    if map_evidence == "photometric_shuffled":
+                        rows = np.flatnonzero(proposal_far_field)
+                        if len(rows) > 1:
+                            rng = np.random.default_rng(
+                                int(self.frontview_far_field_config["shuffle_seed"])
+                                + int(cam.cam_idx)
+                            )
+                            map_residuals[rows] = map_residuals[
+                                rows[rng.permutation(len(rows))]
+                            ]
+                proposal_map_log_odds = projective_map_posterior_log_odds(
+                    pts_depth,
+                    proposal_stable_depth,
+                    1.0 - coverage_scores,
+                    proposal_parallax_pixels,
+                    proposal_projected_radii,
+                    residuals=map_residuals,
+                    residual_scale=map_residual_scale,
+                )
+                proposal_map_redundant = (
+                    proposal_map_log_odds >= 0.0
+                ) & proposal_far_field
+                posterior_refill_requested = int(
+                    np.sum(
+                        proposal_map_redundant
+                        & proposal_budget_primary
+                        & ~proposal_sparse_valid
+                    )
+                )
+                stats = self.frontview_far_field_stats
+                stats["map_gate_calls"] += 1
+                stats["map_gate_rows"] += int(np.sum(proposal_far_field))
+                stats["map_gate_rejected_rows"] += int(
+                    np.sum(proposal_map_redundant)
+                )
+                if photometric_available:
+                    stats["map_gate_photometric_calls"] += 1
+                    stats["map_gate_residual_scale_sum"] += float(
+                        map_residual_scale
+                    )
+                    stats["map_gate_shuffled_calls"] += int(
+                        map_evidence == "photometric_shuffled"
+                    )
             if self._frontview_scale_cover_enabled():
                 if self.frontview_scale_cover.projected_handoff_enabled:
                     intrinsics = cam.get_int_mat(level)
@@ -5011,7 +8610,7 @@ class GaussianModel:
                 scale_cover_source_ranks = (
                     self.frontview_scale_cover.candidate_source_ranks(
                         proposal_sparse_valid,
-                        pts_depth,
+                        responsibility_depth,
                         int(cam.cam_idx),
                     )
                 )
@@ -5020,22 +8619,22 @@ class GaussianModel:
                         residual_scores,
                         proposal_depth_confidence,
                         proposal_sparse_valid,
-                        pts_depth,
+                        responsibility_depth,
                         int(cam.cam_idx),
                     )
                 )
                 occupied_mask, scale_parent_uids = (
                     self.frontview_scale_cover.occupied_with_parents(
-                        pts_3d,
-                        proposal_cover_sizes,
+                        responsibility_pts_3d,
+                        proposal_responsibility_cover_sizes,
                         pts_color,
                         scale_cover_source_ranks,
                         appearance_eligible,
-                        view_directions=proposal_view_directions,
+                        view_directions=proposal_responsibility_view_directions,
                         residual_scores=residual_scores,
                         depth_confidences=proposal_depth_confidence,
                         sparse_valid=proposal_sparse_valid,
-                        depths=pts_depth,
+                        depths=responsibility_depth,
                         frame_id=int(cam.cam_idx),
                     )
                 )
@@ -5044,20 +8643,20 @@ class GaussianModel:
                         occupied_mask,
                         proposal_track_ids,
                         proposal_sparse_valid,
-                        pts_depth,
+                        responsibility_depth,
                         int(cam.cam_idx),
                     )
                 )
                 scale_parent_uids = self.frontview_scale_cover.shuffle_parents(
                     scale_parent_uids,
-                    pts_depth,
+                    responsibility_depth,
                     proposal_sparse_valid,
                     int(cam.cam_idx),
                 )
                 responsibility_parent_uids[:] = scale_parent_uids
                 occupied_mask = self.frontview_scale_cover.route_evidence_quota(
                     occupied_mask,
-                    pts_depth,
+                    responsibility_depth,
                     proposal_sparse_valid,
                     residual_scores,
                     coverage_scores,
@@ -5069,7 +8668,7 @@ class GaussianModel:
                 )
                 occupied_mask = self.frontview_scale_cover.shuffle(
                     occupied_mask,
-                    pts_depth,
+                    responsibility_depth,
                     proposal_sparse_valid,
                     int(cam.cam_idx),
                     eligible=~proposal_far_field,
@@ -5085,7 +8684,18 @@ class GaussianModel:
                 self.frontview_far_field_stats["hash_query_rows"] += int(
                     before_filter_num
                 )
-            occupied_mask[proposal_far_field] = False
+            occupied_mask[proposal_far_field] = proposal_map_redundant[
+                proposal_far_field
+            ]
+            if (
+                self.frontview_far_field_config["unobservable_birth_policy"]
+                == "reject"
+            ):
+                occupied_mask[proposal_far_field] = True
+                self.frontview_far_field_stats["unobservable_rejected_rows"] += int(
+                    np.sum(proposal_far_field)
+                )
+            occupied_mask |= proposal_cidec_reject
             self.frontview_far_field_stats["host_rows"] += int(before_filter_num)
             self.frontview_far_field_stats["hash_bypass_rows"] += int(
                 np.sum(proposal_far_field)
@@ -5095,9 +8705,11 @@ class GaussianModel:
                 pts_3d, pts_color, cur_view_scale_size
             )
         pts_3d = pts_3d[~occupied_mask]
+        responsibility_pts_3d = responsibility_pts_3d[~occupied_mask]
         pts_color = pts_color[~occupied_mask]
         pts_2d = pts_2d[~occupied_mask]
         pts_depth = pts_depth[~occupied_mask]
+        responsibility_depth = responsibility_depth[~occupied_mask]
         residual_scores = residual_scores[~occupied_mask]
         coverage_scores = coverage_scores[~occupied_mask]
         proposal_sparse_valid = proposal_sparse_valid[~occupied_mask]
@@ -5106,9 +8718,40 @@ class GaussianModel:
         proposal_stable_depth = proposal_stable_depth[~occupied_mask]
         proposal_frequency_scores = proposal_frequency_scores[~occupied_mask]
         proposal_track_ids = proposal_track_ids[~occupied_mask]
+        proposal_budget_primary = proposal_budget_primary[~occupied_mask]
+        proposal_map_log_odds = proposal_map_log_odds[~occupied_mask]
         proposal_cover_sizes = proposal_cover_sizes[~occupied_mask]
+        proposal_responsibility_cover_sizes = (
+            proposal_responsibility_cover_sizes[~occupied_mask]
+        )
         proposal_view_directions = proposal_view_directions[~occupied_mask]
+        proposal_responsibility_view_directions = (
+            proposal_responsibility_view_directions[~occupied_mask]
+        )
         proposal_far_field = proposal_far_field[~occupied_mask]
+        proposal_projected_radii = proposal_projected_radii[~occupied_mask]
+        proposal_responsibility_projected_radii = (
+            proposal_responsibility_projected_radii[~occupied_mask]
+        )
+        proposal_log_depth_stds = proposal_log_depth_stds[~occupied_mask]
+        proposal_parallax_pixels = proposal_parallax_pixels[~occupied_mask]
+        proposal_radial_scale_factors = proposal_radial_scale_factors[
+            ~occupied_mask
+        ]
+        proposal_covariance_scale_factors = proposal_covariance_scale_factors[
+            ~occupied_mask
+        ]
+        proposal_initial_quaternions = proposal_initial_quaternions[
+            ~occupied_mask
+        ]
+        proposal_scale_expansion_limits = proposal_scale_expansion_limits[
+            ~occupied_mask
+        ]
+        proposal_footprint_target_scales = proposal_footprint_target_scales[
+            ~occupied_mask
+        ]
+        proposal_depth_fallback = proposal_depth_fallback[~occupied_mask]
+        proposal_tracked_metric = proposal_tracked_metric[~occupied_mask]
         responsibility_parent_uids = responsibility_parent_uids[~occupied_mask]
         responsibility_levels = responsibility_levels[~occupied_mask]
         responsibility_sectors = responsibility_sectors[~occupied_mask]
@@ -5151,22 +8794,67 @@ class GaussianModel:
             if len(far_positions):
                 far_keep = projective_survivor_mask(
                     pts_2d[far_positions],
-                    pts_depth[far_positions],
+                    responsibility_depth[far_positions],
                     residual_scores[far_positions],
                     self.frontview_far_field_config,
+                    projected_radii=proposal_responsibility_projected_radii[
+                        far_positions
+                    ],
+                    log_depth_stds=proposal_log_depth_stds[far_positions],
+                    image_size=(cam.get_width(level), cam.get_height(level)),
+                    birth_budget=int(self.extra_pts_num),
+                    pool_multiplier=int(
+                        self.frontview_sampling_config.get("pool_multiplier", 1)
+                    ),
+                    max_log_depth_std=float(
+                        self.depth_cov_estimator.std_valid_threshold
+                    ),
+                    primary_mask=(
+                        proposal_budget_primary[far_positions]
+                        if self.frontview_far_field_config[
+                            "posterior_budget_refill"
+                        ]
+                        else None
+                    ),
                 )
                 no_conflict_index[far_positions] = far_keep
                 self.frontview_far_field_stats["projective_rejected_rows"] += int(
                     np.sum(~far_keep)
                 )
+                if (
+                    self.frontview_far_field_config["projective_nms_mode"]
+                    == "gaussian_support"
+                ):
+                    stats = self.frontview_far_field_stats
+                    stats["adaptive_nms_calls"] += 1
+                    stats["adaptive_nms_rows"] += int(len(far_positions))
+                    stats["adaptive_nms_rejected_rows"] += int(np.sum(~far_keep))
+                elif (
+                    self.frontview_far_field_config["projective_nms_mode"]
+                    == "budget_cells"
+                ):
+                    cell_px, log_depth_width = budget_cell_parameters(
+                        (cam.get_width(level), cam.get_height(level)),
+                        int(self.extra_pts_num),
+                        int(self.frontview_sampling_config.get("pool_multiplier", 1)),
+                        float(self.depth_cov_estimator.std_valid_threshold),
+                    )
+                    stats = self.frontview_far_field_stats
+                    stats["budget_nms_calls"] += 1
+                    stats["budget_nms_cell_pixel_sum"] += float(cell_px)
+                    stats["budget_nms_log_depth_width_sum"] += float(
+                        log_depth_width
+                    )
         else:
             no_conflict_index = self.hash_block.get_no_conflict_index(
                 pts_3d, cur_view_scale_size
             )
         pts_3d = pts_3d[no_conflict_index]
+        responsibility_pts_3d = responsibility_pts_3d[no_conflict_index]
         pts_color = pts_color[no_conflict_index]
         pts_2d = pts_2d[no_conflict_index]
         pts_depth = pts_depth[no_conflict_index]
+        responsibility_depth = responsibility_depth[no_conflict_index]
         residual_scores = residual_scores[no_conflict_index]
         coverage_scores = coverage_scores[no_conflict_index]
         proposal_sparse_valid = proposal_sparse_valid[no_conflict_index]
@@ -5175,16 +8863,171 @@ class GaussianModel:
         proposal_stable_depth = proposal_stable_depth[no_conflict_index]
         proposal_frequency_scores = proposal_frequency_scores[no_conflict_index]
         proposal_track_ids = proposal_track_ids[no_conflict_index]
+        proposal_budget_primary = proposal_budget_primary[no_conflict_index]
+        proposal_map_log_odds = proposal_map_log_odds[no_conflict_index]
         proposal_cover_sizes = proposal_cover_sizes[no_conflict_index]
+        proposal_responsibility_cover_sizes = (
+            proposal_responsibility_cover_sizes[no_conflict_index]
+        )
         proposal_view_directions = proposal_view_directions[no_conflict_index]
+        proposal_responsibility_view_directions = (
+            proposal_responsibility_view_directions[no_conflict_index]
+        )
         proposal_far_field = proposal_far_field[no_conflict_index]
+        proposal_projected_radii = proposal_projected_radii[no_conflict_index]
+        proposal_responsibility_projected_radii = (
+            proposal_responsibility_projected_radii[no_conflict_index]
+        )
+        proposal_log_depth_stds = proposal_log_depth_stds[no_conflict_index]
+        proposal_parallax_pixels = proposal_parallax_pixels[no_conflict_index]
+        proposal_radial_scale_factors = proposal_radial_scale_factors[
+            no_conflict_index
+        ]
+        proposal_covariance_scale_factors = proposal_covariance_scale_factors[
+            no_conflict_index
+        ]
+        proposal_initial_quaternions = proposal_initial_quaternions[
+            no_conflict_index
+        ]
+        proposal_scale_expansion_limits = proposal_scale_expansion_limits[
+            no_conflict_index
+        ]
+        proposal_footprint_target_scales = proposal_footprint_target_scales[
+            no_conflict_index
+        ]
+        proposal_depth_fallback = proposal_depth_fallback[no_conflict_index]
+        proposal_tracked_metric = proposal_tracked_metric[no_conflict_index]
         responsibility_parent_uids = responsibility_parent_uids[no_conflict_index]
         responsibility_levels = responsibility_levels[no_conflict_index]
         responsibility_sectors = responsibility_sectors[no_conflict_index]
 
+        if (
+            self._frontview_far_field_enabled()
+            and self.frontview_far_field_config["posterior_budget_refill"]
+        ):
+            keep_refill, refill_stats = posterior_budget_refill_mask(
+                proposal_budget_primary,
+                proposal_sparse_valid,
+                proposal_map_log_odds,
+                residual_scores,
+                posterior_refill_requested,
+                reserve_eligible=proposal_far_field,
+                shuffle_evidence=self.frontview_far_field_config[
+                    "shuffle_refill_evidence"
+                ],
+                seed=int(self.frontview_far_field_config["shuffle_seed"])
+                + int(cam.cam_idx),
+            )
+            stats = self.frontview_far_field_stats
+            stats["posterior_refill_calls"] += 1
+            stats["posterior_refill_requested_rows"] += int(
+                refill_stats["requested"]
+            )
+            stats["posterior_refill_reserve_rows"] += int(refill_stats["reserves"])
+            stats["posterior_refill_selected_rows"] += int(refill_stats["selected"])
+            stats["posterior_refill_shuffled_calls"] += int(
+                self.frontview_far_field_config["shuffle_refill_evidence"]
+            )
+            pts_3d = pts_3d[keep_refill]
+            responsibility_pts_3d = responsibility_pts_3d[keep_refill]
+            pts_color = pts_color[keep_refill]
+            pts_2d = pts_2d[keep_refill]
+            pts_depth = pts_depth[keep_refill]
+            responsibility_depth = responsibility_depth[keep_refill]
+            residual_scores = residual_scores[keep_refill]
+            coverage_scores = coverage_scores[keep_refill]
+            proposal_sparse_valid = proposal_sparse_valid[keep_refill]
+            proposal_depth_confidence = proposal_depth_confidence[keep_refill]
+            proposal_multiview_support = proposal_multiview_support[keep_refill]
+            proposal_stable_depth = proposal_stable_depth[keep_refill]
+            proposal_frequency_scores = proposal_frequency_scores[keep_refill]
+            proposal_track_ids = proposal_track_ids[keep_refill]
+            proposal_budget_primary = proposal_budget_primary[keep_refill]
+            proposal_cover_sizes = proposal_cover_sizes[keep_refill]
+            proposal_responsibility_cover_sizes = (
+                proposal_responsibility_cover_sizes[keep_refill]
+            )
+            proposal_view_directions = proposal_view_directions[keep_refill]
+            proposal_responsibility_view_directions = (
+                proposal_responsibility_view_directions[keep_refill]
+            )
+            proposal_far_field = proposal_far_field[keep_refill]
+            proposal_projected_radii = proposal_projected_radii[keep_refill]
+            proposal_responsibility_projected_radii = (
+                proposal_responsibility_projected_radii[keep_refill]
+            )
+            proposal_log_depth_stds = proposal_log_depth_stds[keep_refill]
+            proposal_parallax_pixels = proposal_parallax_pixels[keep_refill]
+            proposal_radial_scale_factors = proposal_radial_scale_factors[keep_refill]
+            proposal_covariance_scale_factors = proposal_covariance_scale_factors[
+                keep_refill
+            ]
+            proposal_initial_quaternions = proposal_initial_quaternions[keep_refill]
+            proposal_scale_expansion_limits = proposal_scale_expansion_limits[
+                keep_refill
+            ]
+            proposal_footprint_target_scales = proposal_footprint_target_scales[
+                keep_refill
+            ]
+            proposal_depth_fallback = proposal_depth_fallback[keep_refill]
+            proposal_tracked_metric = proposal_tracked_metric[keep_refill]
+            responsibility_parent_uids = responsibility_parent_uids[keep_refill]
+            responsibility_levels = responsibility_levels[keep_refill]
+            responsibility_sectors = responsibility_sectors[keep_refill]
+
         if isinstance(init_scale, np.ndarray):
             init_scale = init_scale[~occupied_mask]
+            responsibility_init_scale = responsibility_init_scale[~occupied_mask]
             init_scale = init_scale[no_conflict_index]
+            responsibility_init_scale = responsibility_init_scale[no_conflict_index]
+            if (
+                self._frontview_far_field_enabled()
+                and self.frontview_far_field_config["posterior_budget_refill"]
+            ):
+                init_scale = init_scale[keep_refill]
+                responsibility_init_scale = responsibility_init_scale[keep_refill]
+
+        proposal_metric_certificates = np.ones(
+            (len(pts_depth),), dtype=np.float32
+        )
+        if (
+            self.causal_dual_responsibility_config[
+                "finite_depth_certificate_enabled"
+            ]
+            and len(pts_depth)
+        ):
+            certificate_result = causal_finite_depth_certificates(
+                cam,
+                list(reference_cameras or ()),
+                torch.as_tensor(pts_2d, device=self.device, dtype=torch.float32),
+                torch.as_tensor(pts_depth, device=self.device, dtype=torch.float32),
+                level,
+                pixel_sigma=self.causal_dual_responsibility_config[
+                    "finite_depth_pixel_sigma"
+                ],
+            )
+            proposal_metric_certificates = (
+                certificate_result["certificate"]
+                .detach()
+                .cpu()
+                .numpy()
+                .astype(np.float32, copy=False)
+            )
+            certificate_stats = self.causal_dual_responsibility_stats
+            certificate_stats["finite_certificate_calls"] += 1
+            certificate_stats["finite_certificate_rows"] += int(len(pts_depth))
+            certificate_stats["finite_certificate_valid_rows"] += int(
+                torch.count_nonzero(certificate_result["valid_views"] > 0).item()
+            )
+            certificate_stats["finite_certificate_observability_sum"] += float(
+                certificate_result["observability"].sum().item()
+            )
+            certificate_stats["finite_certificate_support_sum"] += float(
+                certificate_result["finite_support"].sum().item()
+            )
+            certificate_stats["finite_certificate_value_sum"] += float(
+                certificate_result["certificate"].sum().item()
+            )
 
         Log(
             "Proposing new gaussians (before/after host filter): {} / {}".format(
@@ -5218,18 +9061,47 @@ class GaussianModel:
             sparse_depth_valid=proposal_sparse_valid,
             cover_sizes=proposal_cover_sizes,
             view_directions=proposal_view_directions,
+            responsibility_depths=responsibility_depth,
+            responsibility_world_points=responsibility_pts_3d.astype(
+                np.float32, copy=False
+            ),
+            responsibility_log_scales=responsibility_init_scale.astype(
+                np.float32, copy=False
+            ),
+            responsibility_cover_sizes=proposal_responsibility_cover_sizes,
+            responsibility_view_directions=(
+                proposal_responsibility_view_directions
+            ),
+            radial_scale_factors=proposal_radial_scale_factors,
+            covariance_scale_factors=proposal_covariance_scale_factors,
+            scale_expansion_limits=proposal_scale_expansion_limits,
+            footprint_target_scales=proposal_footprint_target_scales,
+            initial_max_parallax_sin2=np.clip(
+                proposal_parallax_pixels / max(float(focal_pixels), 1.0e-8),
+                0.0,
+                1.0,
+            ).astype(np.float32, copy=False)
+            ** 2,
+            initial_quaternions=proposal_initial_quaternions,
+            depth_fallback=proposal_depth_fallback,
             stable_depths=proposal_stable_depth,
             depth_confidences=proposal_depth_confidence,
+            metric_certificates=proposal_metric_certificates,
             multiview_support_scores=proposal_multiview_support,
             frequency_scores=proposal_frequency_scores,
             track_ids=proposal_track_ids,
+            budget_primary=proposal_budget_primary,
             responsibility_parent_uids=responsibility_parent_uids,
             responsibility_levels=responsibility_levels,
             responsibility_sectors=responsibility_sectors,
             source_kinds=np.where(
-                proposal_sparse_valid,
-                "sparse",
-                np.where(proposal_far_field, "depthcov_far", "depthcov"),
+                proposal_tracked_metric,
+                "tracked_metric",
+                np.where(
+                    proposal_sparse_valid,
+                    "sparse",
+                    np.where(proposal_far_field, "depthcov_far", "depthcov"),
+                ),
             ).astype("U32"),
             view_scale_size=float(cur_view_scale_size),
             create_new_group=bool(create_new_group),
@@ -5242,6 +9114,18 @@ class GaussianModel:
                     else None
                 ),
                 "birth_camera_center": birth_camera_center,
+                "birth_focal_pixels": float(focal_pixels),
+                "depthcov_log_std_threshold": float(
+                    self.depth_cov_estimator.std_valid_threshold
+                ),
+                "birth_image_size": (
+                    int(cam.get_width(level)),
+                    int(cam.get_height(level)),
+                ),
+                "birth_candidate_budget": int(self.extra_pts_num),
+                "birth_pool_multiplier": int(
+                    self.frontview_sampling_config.get("pool_multiplier", 1)
+                ),
                 "frequency_sampling_enabled": bool(
                     self.frequency_sampling_config.get("enabled", False)
                 ),
@@ -5368,6 +9252,7 @@ class GaussianModel:
             raise ValueError("Per-row certificate IDs must match selected proposals")
 
         committed_uids = None
+        ray_atlas_commit_keys = []
         if self._frontview_residual_cover_enabled():
             kept_positions = self.frontview_residual_cover.prepare_commit(selected)
         elif self._frontview_identity_lod_enabled():
@@ -5432,7 +9317,7 @@ class GaussianModel:
                     scale_cover_source_ranks = (
                         self.frontview_scale_cover.candidate_source_ranks(
                             selected.sparse_depth_valid,
-                            selected.depths,
+                            selected.responsibility_depths,
                             selected.source_frame_id,
                         )
                     )
@@ -5441,21 +9326,21 @@ class GaussianModel:
                             selected.residual_scores,
                             selected.depth_confidences,
                             selected.sparse_depth_valid,
-                            selected.depths,
+                            selected.responsibility_depths,
                             selected.source_frame_id,
                         )
                     )
                     occupied = self.frontview_scale_cover.occupied(
-                        selected.world_points,
-                        selected.cover_sizes,
+                        selected.responsibility_world_points,
+                        selected.responsibility_cover_sizes,
                         selected.colors,
                         scale_cover_source_ranks,
                         appearance_eligible,
-                        view_directions=selected.view_directions,
+                        view_directions=selected.responsibility_view_directions,
                         residual_scores=selected.residual_scores,
                         depth_confidences=selected.depth_confidences,
                         sparse_valid=selected.sparse_depth_valid,
-                        depths=selected.depths,
+                        depths=selected.responsibility_depths,
                         frame_id=selected.source_frame_id,
                         directional_preselected=True,
                     )
@@ -5464,13 +9349,13 @@ class GaussianModel:
                             occupied,
                             selected.track_ids,
                             selected.sparse_depth_valid,
-                            selected.depths,
+                            selected.responsibility_depths,
                             selected.source_frame_id,
                         )
                     )
                     occupied = self.frontview_scale_cover.route_evidence_quota(
                         occupied,
-                        selected.depths,
+                        selected.responsibility_depths,
                         selected.sparse_depth_valid,
                         selected.residual_scores,
                         selected.coverage_scores,
@@ -5482,7 +9367,7 @@ class GaussianModel:
                     )
                     occupied = self.frontview_scale_cover.shuffle(
                         occupied,
-                        selected.depths,
+                        selected.responsibility_depths,
                         selected.sparse_depth_valid,
                         selected.source_frame_id,
                         eligible=~far_field,
@@ -5514,14 +9399,101 @@ class GaussianModel:
                 local_keep[near_positions] = near_keep
             far_positions = np.flatnonzero(local_keep & far_field)
             if len(far_positions):
+                projected_radii = projected_gaussian_radii(
+                    selected.responsibility_log_scales[far_positions],
+                    selected.responsibility_depths[far_positions],
+                    selected.metadata.get("birth_focal_pixels", 1.0),
+                )
+                log_depth_stds = float(
+                    selected.metadata.get(
+                        "depthcov_log_std_threshold",
+                        self.depth_cov_estimator.std_valid_threshold,
+                    )
+                ) * (
+                    1.0
+                    - np.clip(
+                        selected.depth_confidences[far_positions], 0.0, 1.0
+                    )
+                )
                 far_keep = projective_survivor_mask(
                     selected.uv[far_positions],
-                    selected.depths[far_positions],
+                    selected.responsibility_depths[far_positions],
                     selected.residual_scores[far_positions],
                     self.frontview_far_field_config,
+                    projected_radii=projected_radii,
+                    log_depth_stds=log_depth_stds,
+                    image_size=selected.metadata.get("birth_image_size"),
+                    birth_budget=selected.metadata.get("birth_candidate_budget"),
+                    pool_multiplier=selected.metadata.get("birth_pool_multiplier"),
+                    max_log_depth_std=selected.metadata.get(
+                        "depthcov_log_std_threshold"
+                    ),
+                    primary_mask=(
+                        selected.budget_primary[far_positions]
+                        if self.frontview_far_field_config[
+                            "posterior_budget_refill"
+                        ]
+                        else None
+                    ),
                 )
                 local_keep[far_positions] = far_keep
             kept_positions = np.flatnonzero(local_keep)
+            ray_atlas = getattr(self, "frontview_ray_atlas", None)
+            if (
+                ray_atlas is not None
+                and ray_atlas.enabled
+                and len(kept_positions)
+            ):
+                atlas_positions = kept_positions[far_field[kept_positions]]
+                if len(atlas_positions):
+                    atlas_projected_radii = projected_gaussian_radii(
+                        selected.responsibility_log_scales[atlas_positions],
+                        selected.responsibility_depths[atlas_positions],
+                        selected.metadata["birth_focal_pixels"],
+                    )
+                    atlas_log_depth_stds = float(
+                        selected.metadata["depthcov_log_std_threshold"]
+                    ) * (
+                        1.0
+                        - np.clip(
+                            selected.depth_confidences[atlas_positions],
+                            0.0,
+                            1.0,
+                        )
+                    )
+                    atlas_keep, atlas_keys = ray_atlas.admit(
+                        selected.responsibility_view_directions[atlas_positions],
+                        selected.responsibility_depths[atlas_positions],
+                        image_size=selected.metadata["birth_image_size"],
+                        birth_budget=selected.metadata["birth_candidate_budget"],
+                        pool_multiplier=selected.metadata["birth_pool_multiplier"],
+                        focal_pixels=selected.metadata["birth_focal_pixels"],
+                        max_log_depth_std=selected.metadata[
+                            "depthcov_log_std_threshold"
+                        ],
+                        frame_id=selected.source_frame_id,
+                        world_points=selected.responsibility_world_points[
+                            atlas_positions
+                        ],
+                        camera_center=selected.metadata["birth_camera_center"],
+                        evidence_scores=(
+                            selected.residual_scores[atlas_positions]
+                            * np.clip(
+                                selected.depth_confidences[atlas_positions],
+                                0.0,
+                                1.0,
+                            )
+                        ),
+                        projected_radii=atlas_projected_radii,
+                        log_depth_stds=atlas_log_depth_stds,
+                    )
+                    retained_atlas_positions = atlas_positions[atlas_keep]
+                    keep_mask = np.ones((len(selected),), dtype=np.bool_)
+                    keep_mask[atlas_positions[~atlas_keep]] = False
+                    kept_positions = kept_positions[keep_mask[kept_positions]]
+                    ray_atlas_commit_keys = [
+                        key for key, keep in zip(atlas_keys, atlas_keep) if keep
+                    ]
             if self._frontview_far_field_enabled():
                 self.frontview_far_field_stats["commit_rows"] += int(selected_count)
         else:
@@ -5599,8 +9571,8 @@ class GaussianModel:
                 if np.any(hash_rows):
                     if self._frontview_scale_cover_enabled():
                         self.frontview_scale_cover.register(
-                            committed.world_points[hash_rows],
-                            committed.cover_sizes[hash_rows],
+                            committed.responsibility_world_points[hash_rows],
+                            committed.responsibility_cover_sizes[hash_rows],
                             committed.colors[hash_rows],
                             uids=(
                                 committed_uids[hash_rows]
@@ -5615,7 +9587,9 @@ class GaussianModel:
                                 2,
                                 1,
                             ).astype(np.int8),
-                            view_directions=committed.view_directions[hash_rows],
+                            view_directions=(
+                                committed.responsibility_view_directions[hash_rows]
+                            ),
                         )
                     elif self._frontview_sparse_scale_map_enabled():
                         self.frontview_sparse_scale_map.register(
@@ -5638,20 +9612,28 @@ class GaussianModel:
                 ):
                     if self.frontview_scale_cover.projected_handoff_enabled:
                         self.frontview_scale_cover.stage_projected_handoff(
-                            committed.world_points[~hash_rows],
-                            committed.cover_sizes[~hash_rows],
+                            committed.responsibility_world_points[~hash_rows],
+                            committed.responsibility_cover_sizes[~hash_rows],
                             committed.colors[~hash_rows],
                             uids=committed_uids[~hash_rows],
                             source_ranks=np.ones(
                                 int(np.sum(~hash_rows)), dtype=np.int8
                             ),
-                            view_directions=committed.view_directions[~hash_rows],
+                            view_directions=(
+                                committed.responsibility_view_directions[~hash_rows]
+                            ),
                         )
                     else:
                         self.frontview_scale_cover.register_uids(
                             committed_uids[~hash_rows]
                         )
                 if self._frontview_scale_cover_enabled():
+                    landmark_memory = getattr(self, "causal_landmark_memory", None)
+                    if landmark_memory is not None:
+                        landmark_memory.record_responsibility_registration(
+                            committed.depths[hash_rows],
+                            committed.responsibility_depths[hash_rows],
+                        )
                     self.frontview_scale_cover.register_sparse_tracks(
                         committed.track_ids,
                         committed.sparse_depth_valid,
@@ -5681,6 +9663,20 @@ class GaussianModel:
                 scale_expansion_limits = conditional_scale_expansion_limits(
                     committed.frequency_scores, frequency_config
                 )
+            footprint_release_limits = (
+                np.full((len(committed),), np.inf, dtype=np.float32)
+                if scale_expansion_limits is None
+                else np.asarray(scale_expansion_limits, dtype=np.float32).copy()
+            )
+            proposal_limits = np.asarray(
+                committed.scale_expansion_limits, dtype=np.float32
+            )
+            if np.any(np.isfinite(proposal_limits)):
+                scale_expansion_limits = (
+                    proposal_limits
+                    if scale_expansion_limits is None
+                    else np.minimum(scale_expansion_limits, proposal_limits)
+                )
             if self._frontview_birth_enabled():
                 layered_limits = layered_scale_expansion_limits(
                     committed.depths,
@@ -5695,18 +9691,193 @@ class GaussianModel:
                 self.frontview_birth_stats["scale_capped_rows"] += int(
                     np.isfinite(layered_limits).sum()
                 )
+                footprint_release_limits = np.minimum(
+                    footprint_release_limits, layered_limits
+                )
             target_group = self.gaussian_groups[current_group_id]
             first_new_row = target_group.get_num
+            metric_confidences = None
+            uncertainty_confidences = None
+            dual_responsibility_config = getattr(
+                self,
+                "causal_dual_responsibility_config",
+                {"enabled": False},
+            )
+            if dual_responsibility_config["enabled"]:
+                uncertainty_confidences = proposal_metric_confidences(
+                    committed.source_kinds,
+                    committed.depth_confidences,
+                    committed.depth_fallback,
+                    dual_responsibility_config,
+                )
+                metric_confidences = uncertainty_confidences.copy()
+                if dual_responsibility_config[
+                    "finite_depth_certificate_enabled"
+                ]:
+                    certificate = committed.metric_certificates
+                    if dual_responsibility_config[
+                        "finite_depth_certificate_scope"
+                    ] == "depthcov":
+                        certificate = np.where(
+                            np.char.startswith(
+                                committed.source_kinds, "depthcov"
+                            ),
+                            certificate,
+                            1.0,
+                        )
+                    else:
+                        certificate = np.where(
+                            committed.source_kinds == "tracked_metric",
+                            1.0,
+                            certificate,
+                        )
+                    metric_confidences *= certificate.astype(
+                        np.float32, copy=False
+                    )
+                dual_stats = self.causal_dual_responsibility_stats
+                dual_stats["metric_rows"] += int(
+                    np.sum(metric_confidences >= 1.0)
+                )
+                dual_stats["proxy_rows"] += int(
+                    np.sum(metric_confidences <= 0.0)
+                )
+                dual_stats["partial_metric_rows"] += int(
+                    np.sum(
+                        (metric_confidences > 0.0)
+                        & (metric_confidences < 1.0)
+                    )
+                )
+                dual_stats["metric_confidence_sum"] += float(
+                    np.sum(metric_confidences)
+                )
+            committed_scales = committed.log_scales
+            committed_quaternions = None
+            covariance_mode = getattr(
+                self, "frontview_far_field_config", {}
+            ).get(
+                "projective_covariance_mode", "isotropic"
+            )
+            fallback_support_mode = getattr(
+                self, "frontview_far_field_config", {}
+            ).get("fallback_support_mode", "legacy")
+            covariance_rows = committed.source_kinds == "depthcov_far"
+            fallback_structure_rows = (
+                covariance_rows
+                & committed.depth_fallback
+                & bool(fallback_support_mode.startswith("budget_structure"))
+            )
+            causal_metric_birth_config = getattr(
+                self,
+                "causal_metric_birth_config",
+                {"support_mode": "point"},
+            )
+            tracked_structure_rows = (
+                (committed.source_kinds == "tracked_metric")
+                & (
+                    causal_metric_birth_config["support_mode"]
+                    == "budget_structure"
+                )
+            )
+            if (
+                (covariance_mode != "isotropic" and np.any(covariance_rows))
+                or np.any(fallback_structure_rows)
+                or np.any(tracked_structure_rows)
+            ):
+                base_scales = np.asarray(committed.log_scales, dtype=np.float32)
+                committed_scales = (
+                    np.repeat(base_scales, 3, axis=1)
+                    if base_scales.shape[1] == 1
+                    else base_scales.copy()
+                )
+                committed_scales[covariance_rows, 2] += np.log(
+                    committed.radial_scale_factors[covariance_rows]
+                )
+                committed_quaternions = np.zeros(
+                    (len(committed), 4), dtype=np.float32
+                )
+                committed_quaternions[:, 0] = 1.0
+                if np.any(fallback_structure_rows):
+                    committed_scales[fallback_structure_rows] += np.log(
+                        committed.covariance_scale_factors[
+                            fallback_structure_rows
+                        ]
+                    )
+                    committed_quaternions[fallback_structure_rows] = (
+                        committed.initial_quaternions[fallback_structure_rows]
+                    )
+                if np.any(tracked_structure_rows):
+                    committed_scales[tracked_structure_rows] += np.log(
+                        committed.covariance_scale_factors[
+                            tracked_structure_rows
+                        ]
+                    )
+                    committed_quaternions[tracked_structure_rows] = (
+                        committed.initial_quaternions[tracked_structure_rows]
+                    )
+                if covariance_mode != "isotropic" and np.any(covariance_rows):
+                    committed_quaternions[covariance_rows] = ray_aligned_quaternions(
+                        committed.view_directions[covariance_rows]
+                    )
+                    factors = committed.radial_scale_factors[covariance_rows]
+                    stats = self.frontview_far_field_stats
+                    stats["projective_covariance_rows"] += int(len(factors))
+                    stats["projective_radial_factor_sum"] += float(np.sum(factors))
+                    factor_min = float(np.min(factors))
+                    factor_max = float(np.max(factors))
+                    stats["projective_radial_factor_min"] = (
+                        factor_min
+                        if stats["projective_radial_factor_min"] is None
+                        else min(stats["projective_radial_factor_min"], factor_min)
+                    )
+                    stats["projective_radial_factor_max"] = (
+                        factor_max
+                        if stats["projective_radial_factor_max"] is None
+                        else max(stats["projective_radial_factor_max"], factor_max)
+                    )
             target_group.extend_gaussians_from_color_points(
                 committed.world_points,
                 committed.colors,
-                committed.log_scales,
+                committed_scales,
                 initial_opacity=committed_opacity,
                 max_scale_expansion=scale_expansion_limits,
+                footprint_trust_mask=(
+                    np.isfinite(committed.scale_expansion_limits)
+                    if getattr(self, "frontview_far_field_config", {}).get(
+                        "footprint_trust_dynamic_update", False
+                    )
+                    else None
+                ),
+                footprint_target_scales=committed.footprint_target_scales,
+                footprint_release_scale_expansions=footprint_release_limits,
                 directional_observability_mask=(
-                    np.char.startswith(committed.source_kinds, "depthcov")
+                    (
+                        committed.source_kinds == "depthcov_far"
+                        if self.frontview_observability_config.get(
+                            "responsibility_scope", "all_depthcov"
+                        )
+                        == "projective_only"
+                        else np.char.startswith(
+                            committed.source_kinds, "depthcov"
+                        )
+                    )
                     if "birth_camera_center" in committed.metadata
                     else None
+                ),
+                directional_log_depth_stds=(
+                    float(
+                        committed.metadata.get(
+                            "depthcov_log_std_threshold",
+                            getattr(
+                                getattr(self, "depth_cov_estimator", None),
+                                "std_valid_threshold",
+                                0.0,
+                            ),
+                        )
+                    )
+                    * (1.0 - np.clip(committed.depth_confidences, 0.0, 1.0))
+                ).astype(np.float32, copy=False),
+                directional_initial_max_parallax_sin2=(
+                    committed.initial_max_parallax_sin2
                 ),
                 reference_camera_center=committed.metadata.get(
                     "birth_camera_center"
@@ -5718,7 +9889,15 @@ class GaussianModel:
                     int(committed.source_frame_id),
                     dtype=np.int64,
                 ),
+                metric_confidences=metric_confidences,
+                uncertainty_confidences=uncertainty_confidences,
+                initial_quaternions=committed_quaternions,
             )
+            if ray_atlas_commit_keys:
+                self.frontview_ray_atlas.register(
+                    ray_atlas_commit_keys,
+                    committed.source_frame_id,
+                )
             if self._frontview_track_fusion_enabled() and not getattr(
                 self, "frontview_track_lookup_dirty", True
             ):
@@ -5775,8 +9954,10 @@ class GaussianModel:
         render_pkg=None,
         level=0,
         reference_cameras=None,
+        causal_reference_cameras=None,
         coverage_recovery=False,
         coverage_recovery_translation_m=None,
+        coverage_recovery_budget=None,
     ):
         """Baseline-compatible immediate proposal and commit path."""
         proposal_kwargs = {
@@ -5786,11 +9967,14 @@ class GaussianModel:
         }
         if reference_cameras is not None:
             proposal_kwargs["reference_cameras"] = reference_cameras
+        if causal_reference_cameras is not None:
+            proposal_kwargs["causal_reference_cameras"] = causal_reference_cameras
         if coverage_recovery:
             proposal_kwargs["coverage_recovery"] = True
             proposal_kwargs["coverage_recovery_translation_m"] = (
                 coverage_recovery_translation_m
             )
+            proposal_kwargs["coverage_recovery_budget"] = coverage_recovery_budget
         proposals = self.propose_new_gaussians(cam, **proposal_kwargs)
         initial_opacity = 0.5
         if self._frontview_birth_enabled() and bool(
@@ -6212,8 +10396,124 @@ class GaussianModel:
         )
         return removed_track_ids, removed_gaussian_uids
 
-    def prune_w_opacity(self, current_frame_id=None, processed_frames=None):
+    @staticmethod
+    def _pruning_tensor_summary(values, mask):
+        values = values.reshape(-1)[mask]
+        values = values[torch.isfinite(values)]
+        if values.numel() == 0:
+            return {"count": 0, "mean": None, "q10": None, "q50": None, "q90": None}
+        quantiles = torch.quantile(
+            values.float(),
+            torch.tensor((0.1, 0.5, 0.9), device=values.device),
+        )
+        return {
+            "count": int(values.numel()),
+            "mean": float(values.float().mean().item()),
+            "q10": float(quantiles[0].item()),
+            "q50": float(quantiles[1].item()),
+            "q90": float(quantiles[2].item()),
+        }
+
+    @torch.no_grad()
+    def _audit_opacity_pruning(self, camera, current_frame_id, processed_frames):
+        if not getattr(self, "opacity_pruning_audit_enabled", False) or camera is None:
+            return
+        pose = camera.get_pose().detach().to(self.device, dtype=torch.float32)
+        call = {
+            "frame_id": int(current_frame_id),
+            "processed_frames": int(processed_frames),
+            "threshold": float(self.opacity_prune_threshold),
+            "groups": [],
+        }
+        for level in range(self.MAX_LEVEL):
+            for group_id in self.active_gaussian_groups[level]:
+                if group_id in self.progressive_group_ids:
+                    continue
+                group = self.gaussian_groups[group_id]
+                count = int(group.get_num)
+                if count == 0:
+                    continue
+                params = group.non_trainable_params
+                opacity = group.get_opacity.reshape(-1)
+                removed = opacity <= float(self.opacity_prune_threshold)
+                means = group.get_xyz
+                camera_points = means @ pose[:3, :3].T + pose[:3, 3]
+                depth = camera_points[:, 2]
+                projection = camera_points @ camera.get_int_mat(0).detach().to(
+                    means.device, dtype=means.dtype
+                ).T
+                u = projection[:, 0] / torch.clamp(depth, min=1.0e-8)
+                v = projection[:, 1] / torch.clamp(depth, min=1.0e-8)
+                visible = (
+                    (depth > float(camera.near))
+                    & (depth < float(camera.far))
+                    & (u >= 0.0)
+                    & (u < float(camera.get_width(0)))
+                    & (v >= 0.0)
+                    & (v < float(camera.get_height(0)))
+                )
+                birth = params["birth_frame_ids"]
+                age = torch.clamp(
+                    torch.full_like(birth, int(current_frame_id)) - birth,
+                    min=0,
+                ).float()
+                scale = group.get_scaling.mean(dim=1)
+                expansion = scale / torch.clamp(group.get_init_scales, min=1.0e-8)
+                row = {
+                    "group_id": int(group_id),
+                    "level": int(level),
+                    "before": count,
+                    "removed": int(removed.sum().item()),
+                    "removed_visible": int((removed & visible).sum().item()),
+                    "removed_persistent_identity": int(
+                        (removed & (params["track_ids"] >= 0)).sum().item()
+                    ),
+                    "removed_depthcov_owned": int(
+                        (removed & params["directional_observability_mask"]).sum().item()
+                    ),
+                }
+                for name, values in (
+                    ("opacity", opacity),
+                    ("camera_depth_m", depth),
+                    ("age_frames", age),
+                    ("world_scale_m", scale),
+                    ("scale_expansion", expansion),
+                    ("metric_confidence", params["metric_confidences"]),
+                    ("parallax_sin2", params["max_parallax_sin2"]),
+                    ("birth_log_depth_std", params["birth_log_depth_stds"]),
+                    ("gradient_utility", params["gradient_utility_ema"]),
+                    ("appearance_views", params["appearance_view_count"].float()),
+                ):
+                    row["removed_" + name] = self._pruning_tensor_summary(values, removed)
+                    row["retained_" + name] = self._pruning_tensor_summary(values, ~removed)
+                call["groups"].append(row)
+        call["before"] = int(sum(row["before"] for row in call["groups"]))
+        call["removed"] = int(sum(row["removed"] for row in call["groups"]))
+        call["removed_visible"] = int(
+            sum(row["removed_visible"] for row in call["groups"])
+        )
+        self.opacity_pruning_audit_calls.append(call)
+
+    def opacity_pruning_audit_summary(self):
+        return {
+            "enabled": self.opacity_pruning_audit_enabled,
+            "calls": list(self.opacity_pruning_audit_calls),
+            "total_removed": int(
+                sum(call["removed"] for call in self.opacity_pruning_audit_calls)
+            ),
+            "total_removed_visible": int(
+                sum(call["removed_visible"] for call in self.opacity_pruning_audit_calls)
+            ),
+        }
+
+    def prune_w_opacity(
+        self, camera=None, current_frame_id=None, processed_frames=None
+    ):
         if self.opacity_prune_threshold > 0:
+            if current_frame_id is not None and processed_frames is not None:
+                self._audit_opacity_pruning(
+                    camera, int(current_frame_id), int(processed_frames)
+                )
             before_num = self.get_num_gaussians
             removed_track_ids = []
             removed_gaussian_uids = []
@@ -6332,6 +10632,21 @@ class GaussianModel:
             .numpy()
             .reshape(-1, 1)
         )
+        uncertainty_confidences = (
+            torch.cat(
+                [
+                    self.gaussian_groups[i].non_trainable_params[
+                        "uncertainty_confidences"
+                    ]
+                    for i in self.valid_groups
+                ],
+                dim=0,
+            )
+            .detach()
+            .cpu()
+            .numpy()
+            .reshape(-1, 1)
+        )
         scales = (
             torch.cat(
                 [self.gaussian_groups[i].splats["scales"] for i in self.valid_groups],
@@ -6350,6 +10665,21 @@ class GaussianModel:
             .cpu()
             .numpy()
         )
+        metric_confidences = (
+            torch.cat(
+                [
+                    self.gaussian_groups[i].non_trainable_params[
+                        "metric_confidences"
+                    ]
+                    for i in self.valid_groups
+                ],
+                dim=0,
+            )
+            .detach()
+            .cpu()
+            .numpy()
+            .reshape(-1, 1)
+        )
 
         l = ["x", "y", "z", "nx", "ny", "nz"]
         # All channels except the 3 DC
@@ -6362,15 +10692,99 @@ class GaussianModel:
             l.append("scale_{}".format(i))
         for i in range(rotations.shape[1]):
             l.append("rot_{}".format(i))
+        l.append("metric_confidence")
+        l.append("uncertainty_confidence")
 
         dtype_full = [(attribute, "f4") for attribute in l]
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
         attributes = np.concatenate(
-            (xyz, normals, f_dc, f_rest, opacities, scales, rotations), axis=1
+            (
+                xyz,
+                normals,
+                f_dc,
+                f_rest,
+                opacities,
+                scales,
+                rotations,
+                metric_confidences,
+                uncertainty_confidences,
+            ),
+            axis=1,
         )
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, "vertex")
         PlyData([el]).write(path)
+
+    @torch.no_grad()
+    def save_as_tgbr_sparse_ply(self, path):
+        """Save SH2 densely and only allocated SH3 bands in a packed bank."""
+
+        config = self.streaming_appearance_lod_config
+        if not config["enabled"]:
+            raise RuntimeError("TGBR sparse export requires StreamingAppearanceLOD")
+        base_degree = int(config["birth_degree"])
+        target_degree = int(config["target_degree"])
+        if self.max_sh_degree != target_degree:
+            raise RuntimeError(
+                "TGBR sparse export requires Model.sh_degree == target_degree"
+            )
+
+        params = {
+            name: torch.cat(
+                [
+                    self.gaussian_groups[index].splats[name]
+                    for index in self.valid_groups
+                ],
+                dim=0,
+            )
+            for name in ("means", "sh0", "shN", "opacities", "scales", "quats")
+        }
+        degrees = torch.cat(
+            [
+                self.gaussian_groups[index].non_trainable_params[
+                    "appearance_sh_degree"
+                ]
+                for index in self.valid_groups
+            ],
+            dim=0,
+        )
+        metric_confidences = torch.cat(
+            [
+                self.gaussian_groups[index].non_trainable_params[
+                    "metric_confidences"
+                ]
+                for index in self.valid_groups
+            ],
+            dim=0,
+        )
+        uncertainty_confidences = torch.cat(
+            [
+                self.gaussian_groups[index].non_trainable_params[
+                    "uncertainty_confidences"
+                ]
+                for index in self.valid_groups
+            ],
+            dim=0,
+        )
+        active_mask = degrees >= target_degree
+        stats = write_tgbr_sparse_ply(
+            path,
+            means=params["means"].detach().cpu().numpy(),
+            sh0=params["sh0"].detach().cpu().numpy(),
+            shN=params["shN"].detach().cpu().numpy(),
+            opacities=params["opacities"].detach().cpu().numpy(),
+            scales=params["scales"].detach().cpu().numpy(),
+            quats=params["quats"].detach().cpu().numpy(),
+            active_mask=active_mask.detach().cpu().numpy(),
+            base_degree=base_degree,
+            target_degree=target_degree,
+            metric_confidences=metric_confidences.detach().cpu().numpy(),
+            uncertainty_confidences=(
+                uncertainty_confidences.detach().cpu().numpy()
+            ),
+        )
+        self.tgbr_sparse_model_stats = stats
+        return stats
 
     @torch.no_grad()
     def save_raw_splats_as_ply(self, params, path):

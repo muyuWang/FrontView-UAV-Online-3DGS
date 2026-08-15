@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_eqr_sh2_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-pqr-sh2-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-pqr-sh2-full"
+
+FrontViewScaleCover:
+  quota_projective_cell_px: 12.0
+  quota_route_sparse: true

@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_residual_utility_budget1_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-residual-pbsd-order-budget1-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-residual-pbsd-order-budget1-200"
+
+FrontViewResidualCover:
+  selection_mode: "pbsd_order"
+  utility_fraction: 0.0

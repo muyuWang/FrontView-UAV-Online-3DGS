@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_pfc_revisit1700_gpu.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-dcsc45-revisit1700-gpu"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-dcsc45-revisit1700-gpu"
+
+FrontViewScaleCover:
+  directional_ownership_enabled: true
+  directional_max_angle_deg: 45.0

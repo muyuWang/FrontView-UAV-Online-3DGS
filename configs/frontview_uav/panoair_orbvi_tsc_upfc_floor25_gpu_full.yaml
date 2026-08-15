@@ -1,0 +1,13 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_pfc_floor25_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-upfc-floor25-gpu-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-upfc-floor25-gpu-full"
+
+FrontViewFarField:
+  enabled: false
+
+FrontViewScaleCover:
+  query_backend: "pytorch3d_knn"

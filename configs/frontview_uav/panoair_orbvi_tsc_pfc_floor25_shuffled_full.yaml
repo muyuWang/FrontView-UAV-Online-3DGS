@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_pfc_floor25_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-floor25-shuffled-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-floor25-shuffled-full"
+
+FrontViewScaleCover:
+  shuffle_footprints: true

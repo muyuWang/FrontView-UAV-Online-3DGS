@@ -1,0 +1,51 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_coverage_recovery/mountains_directional_layer_full.yaml
+
+Dataset:
+  name: 360DVO-CRR-mountains
+
+Testset:
+  name: 360DVO-CRR-mountains
+
+Results:
+  save_dir: /home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_mountains_crr_ablation_8_12
+  save_gt: false
+  save_exr: false
+  save_mesh: false
+  skip_eval: true
+
+Model:
+  frequency_sampling:
+    preserve_sparse_track_geometry: false
+
+FrontViewSampling:
+  selection_mode: depth_stratified
+
+FrontViewFarField:
+  enabled: true
+  routing_mode: fixed_depth
+  responsibility_basis: source
+  depth_m: 80.0
+  projective_nms_mode: fixed_grid
+  projective_cell_px: 12
+  depth_bin_ratio: 1.1
+  map_redundancy_gate: false
+  shuffle_responsibility: false
+  shuffle_seed: 42
+
+FrontViewScaleCover:
+  enabled: true
+  target_size_mode: view_scale
+  distance_mode: fixed_radius
+  radius_multiplier: 0.3
+  color_distance_threshold: 0.15
+
+StreamingAppearanceLOD:
+  enabled: true
+  birth_degree: 2
+  target_degree: 3
+  min_views: 2
+  max_target_fraction: 0.75
+  promotion_interval: 10
+  selection_mode: gradient_agreement
+  utility_ema_decay: 0.9
+  shuffle_seed: 43

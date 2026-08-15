@@ -1,0 +1,16 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pbsd_far_projective80_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-clsm-l8-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-clsm-l8-200"
+
+HashBlock:
+  use_hash: false
+
+FrontViewSparseScaleMap:
+  enabled: true
+  start_scale: 20.0
+  levels: 8
+  coordinate_bits: 21

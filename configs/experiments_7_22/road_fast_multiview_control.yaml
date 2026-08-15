@@ -12,3 +12,4 @@ Mapper:
     global_window_size: 4
   CameraOptimizer:
     pose_opt_steps: 4
+

@@ -1,0 +1,15 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_tgbr75_sh3_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-compute-routed-warmup20-fp32-200"
+
+Testset:
+  name: "PanoAir-tgbr-compute-routed-warmup20-fp32-200"
+
+StreamingAppearanceLOD:
+  compute_routing: true
+  compute_routing_warmup_evidence_updates: 20
+  gradient_ema_dtype: "float32"
+
+Results:
+  skip_eval: true

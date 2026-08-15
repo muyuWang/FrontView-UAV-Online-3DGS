@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_pfc_floor25_gpu_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-revisit1700-gpu"
+  end_cutoff: 530
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-revisit1700-gpu"
+  begin_cutoff: 1000
+  end_cutoff: 530

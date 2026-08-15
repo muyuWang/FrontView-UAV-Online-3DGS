@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_residual_retire_gradient-opacity_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-residual-retire-gradient-opacity-shuffled-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-residual-retire-gradient-opacity-shuffled-200"
+
+FrontViewResidualCover:
+  shuffle_retirement: true

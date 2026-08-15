@@ -1,0 +1,16 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_r0p3_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-handoff-floor75-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-handoff-floor75-200"
+
+FrontViewScaleCover:
+  dynamic_handoff_enabled: true
+  handoff_radius_start_px: 4.0
+  handoff_radius_end_px: 8.0
+  handoff_parent_floor: 0.75
+  handoff_area_full: 1.0
+  handoff_batch_reduce: "max"
+  shuffle_handoff: false

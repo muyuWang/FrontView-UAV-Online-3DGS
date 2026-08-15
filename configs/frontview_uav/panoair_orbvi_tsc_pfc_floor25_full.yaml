@@ -1,0 +1,13 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_r0p3_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-floor25-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-floor25-full"
+
+FrontViewScaleCover:
+  per_candidate_footprints: true
+  footprint_ratio_min: 0.25
+  footprint_ratio_max: 2.0
+  shuffle_footprints: false

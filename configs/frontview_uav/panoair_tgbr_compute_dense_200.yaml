@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_tgbr75_sh3_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-compute-dense-200"
+
+Testset:
+  name: "PanoAir-tgbr-compute-dense-200"
+
+Results:
+  skip_eval: true

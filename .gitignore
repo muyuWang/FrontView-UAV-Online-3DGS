@@ -1,12 +1,6 @@
 *.pyc
-__pycache__/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.DS_Store
 .vscode
 output
-/outputs/
 build
 diff_rasterization/diff_rast.egg-info
 **.egg-info
@@ -16,15 +10,6 @@ diff_rasterization/dist
 cameras.json
 *.ply
 *.mp4
-*.avi
-*.mov
-*.mkv
-*.exr
-*.pt
-*.pth
-*.ckpt
-*.npz
-*.npy
 datasets
 wandb
 
@@ -35,10 +20,7 @@ tmp
 msgs/build
 Logs
 /Logs_*/
-/logs/
 /data/
-/checkpoints/
-/runs/
 /ideaspark_run/
 /papers/
 /researchstudio_runs/

@@ -1,0 +1,12 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pcra_s3_r1p5_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-pcra-smoke10"
+  stride: 20
+
+Testset:
+  name: "PanoAir-frontview-orbvi-pcra-smoke10"
+  stride: 20
+
+Results:
+  skip_eval: true

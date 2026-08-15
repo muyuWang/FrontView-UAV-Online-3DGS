@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_pcpr_sh2_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-pcpr-turn-ablated-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-pcpr-turn-ablated-full"
+
+FrontViewScaleCover:
+  revisit_min_cumulative_turn_deg: 0.0

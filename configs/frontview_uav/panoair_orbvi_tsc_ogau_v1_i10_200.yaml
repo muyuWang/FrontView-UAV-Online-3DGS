@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_ogau_v2_i10_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-ogau-v1-i10-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-ogau-v1-i10-200"
+
+StreamingAppearanceLOD:
+  min_views: 1

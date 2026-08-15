@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""Screen dyadic-evidence canonical ray responsibility on Mountains."""
+
+import run_mountains_crr_ablation as runner
+
+
+runner.DEFAULT_CONFIG = (
+    runner.ROOT
+    / "configs/360dvo_coverage_recovery/mountains_adaptive_responsibility_best.yaml"
+)
+runner.DEFAULT_OUTPUT = runner.ROOT / "Logs_mountains_crr_stage20_8_13"
+
+runner.VARIANTS = {
+    "A_camera_hard": {
+        "far_field": {
+            "ray_atlas_enabled": True,
+            "ray_atlas_shuffle_evidence": False,
+            "ray_atlas_coordinate_mode": "camera_ray",
+            "ray_atlas_competition_mode": "hard_cell",
+        },
+    },
+    "B_canonical_continuous": {
+        "far_field": {
+            "ray_atlas_enabled": True,
+            "ray_atlas_shuffle_evidence": False,
+            "ray_atlas_coordinate_mode": "canonical_world",
+            "ray_atlas_competition_mode": "continuous_kernel",
+        },
+    },
+    "C_canonical_dyadic": {
+        "far_field": {
+            "ray_atlas_enabled": True,
+            "ray_atlas_shuffle_evidence": False,
+            "ray_atlas_coordinate_mode": "canonical_world",
+            "ray_atlas_competition_mode": "continuous_dyadic",
+        },
+    },
+    "D_dyadic_shuffled": {
+        "far_field": {
+            "ray_atlas_enabled": True,
+            "ray_atlas_shuffle_evidence": True,
+            "ray_atlas_coordinate_mode": "canonical_world",
+            "ray_atlas_competition_mode": "continuous_dyadic",
+        },
+    },
+}
+
+
+if __name__ == "__main__":
+    raise SystemExit(runner.main())

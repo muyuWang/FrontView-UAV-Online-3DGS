@@ -1,0 +1,47 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_coverage_recovery/mountains_adaptive_responsibility_best.yaml
+
+Dataset:
+  name: 360DVO-ObservabilityTypedOwnership-mountains
+
+Testset:
+  name: 360DVO-ObservabilityTypedOwnership-mountains
+
+Results:
+  save_dir: /home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_mountains_observability_typed_ownership
+
+FrontViewSampling:
+  selection_mode: adaptive_log_depth_random
+
+FrontViewFarField:
+  routing_mode: adaptive_observability
+  ray_atlas_enabled: false
+  ray_atlas_shuffle_evidence: false
+  shuffle_responsibility: false
+  footprint_trust_scope: all_depthcov
+  footprint_trust_mode: certificate_residual_rd_visible_detail
+
+FrontViewCoverageRecovery:
+  depth_fallback_enabled: false
+
+CausalDualResponsibility:
+  enabled: true
+  depthcov_confidence_mode: posterior
+  directional_use_metric_depth: true
+  geometry_use_metric_depth: true
+  export_metric_depth: true
+  minimum_metric_opacity: 1.0e-6
+
+FrontViewDirectionalLayer:
+  enabled: true
+  anchor_selection_mode: episode_ordered_ward
+  anchor_interval_frames: null
+  max_anchors: 24
+  min_anchors: 2
+  pose_score_mode: rendered_inverse_depth
+  far_depth_m: null
+  use_geometry_gate: false
+  geometry_gate_mode: metric_transmittance
+  blend_weight: 1.0
+  warp_mode: se3_fallback
+  source_fusion: first
+  warp_depth_control: aligned

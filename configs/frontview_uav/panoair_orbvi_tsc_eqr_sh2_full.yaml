@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_r0p3_color15_sh2_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-eqr-sh2-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-eqr-sh2-full"
+
+FrontViewScaleCover:
+  evidence_quota_routing: true

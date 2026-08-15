@@ -23,15 +23,14 @@ DEFAULT_DATA_ROOT = ROOT / "data" / "Online3DGS_360DVO"
 DEFAULT_PREPARED_ROOT = ROOT / "data" / "Online3DGS_360DVO_pose_contract_v4"
 DEFAULT_WORK_ROOT = ROOT / "data" / "Online3DGS_360DVO_pose_contract_v4_work"
 DEFAULT_CACHE_ROOT = ROOT / "data" / "Online3DGS_360DVO_orbmono_fixed_dense_v3_cache"
-DEFAULT_PYTHON = Path(os.environ.get("ONLINE3DGS_PYTHON", sys.executable))
-DEFAULT_CUDA_HOME = Path(os.environ.get("CUDA_HOME", "/usr/local/cuda-11.8"))
-DEFAULT_ORB_ROOT = Path(
-    os.environ.get("ORB_SLAM3_ROOT", ROOT / "third_party" / "ORB_SLAM3")
+DEFAULT_PYTHON = Path("/home/wmy/anaconda3/envs/worldvln/bin/python")
+DEFAULT_CUDA_HOME = Path("/usr/local/cuda-11.8")
+DEFAULT_ORB_BINARY = Path(
+    "/home/wmy/workspace_vla/third_party/ORB_SLAM3/Examples/Monocular/mono_tum_vi"
 )
-DEFAULT_ORB_BINARY = (
-    DEFAULT_ORB_ROOT / "Examples" / "Monocular" / "mono_tum_vi"
+DEFAULT_ORB_VOCABULARY = Path(
+    "/home/wmy/workspace_vla/third_party/ORB_SLAM3/Vocabulary/ORBvoc.txt"
 )
-DEFAULT_ORB_VOCABULARY = DEFAULT_ORB_ROOT / "Vocabulary" / "ORBvoc.txt"
 DEFAULT_ORB_SETTINGS = ROOT / "configs" / "360dvo" / "orbslam3_grove_frontview.yaml"
 
 

@@ -1,0 +1,12 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_orbmono_fixed_runtime/360DVO_city_driving_orbmono_fixed_tgbr75.yaml
+
+Dataset:
+  dataset_path: /home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_360DVO_orbmono_fixed_dense_v3/city_driving_orbmono_epipolar_gtcenter_tracks
+  max_pts_num: 800
+
+Testset:
+  dataset_path: /home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_360DVO_orbmono_fixed_dense_v3/city_driving_orbmono_epipolar_gtcenter_tracks
+  max_pts_num: 800
+
+Model:
+  extra_pts_num: 600

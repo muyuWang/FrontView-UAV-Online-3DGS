@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_residual_cover_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-residual-cover-wide-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-residual-cover-wide-200"
+
+FrontViewResidualCover:
+  selection_sigma_floor_px: 1.0

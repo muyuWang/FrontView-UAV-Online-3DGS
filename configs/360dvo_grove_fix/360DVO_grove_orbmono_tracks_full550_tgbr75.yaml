@@ -1,0 +1,13 @@
+inherit_from: "/home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_tgbr75_runtime/360DVO_grove_tgbr75.yaml"
+
+Dataset:
+  name: "360DVO-Grove-ORBMonoTracks-Full550-TGBR75"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_360DVO_orbslam3/grove_orbmono_tracks_full550_slerp_gtcenter"
+
+Testset:
+  name: "360DVO-Grove-ORBMonoTracks-Full550-TGBR75"
+  dataset_path: "/home/wmy/workspace_vla/Online-3DGS-Monocular/data/Online3DGS_360DVO_orbslam3/grove_orbmono_tracks_full550_slerp_gtcenter"
+
+Results:
+  save_dir: "/home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_360dvo_grove_input_fix"
+  skip_eval: false

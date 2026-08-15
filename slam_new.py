@@ -60,6 +60,13 @@ class SLAM:
         info["num_gaussians"] = scene_mapper_meta["num_gaussians"]
         info["num_keyframes"] = scene_mapper_meta["num_keyframes"]
         info["kf_ids"] = scene_mapper_meta["kf_ids"]
+        for timing_key in (
+            "online_mapping_seconds",
+            "online_stage_export_seconds",
+            "post_refinement_seconds",
+        ):
+            if timing_key in scene_mapper_meta:
+                info[timing_key] = scene_mapper_meta[timing_key]
         if "progressive_runtime" in scene_mapper_meta:
             info["progressive_runtime"] = scene_mapper_meta["progressive_runtime"]
         if "aerocommit_summary" in scene_mapper_meta:
@@ -78,6 +85,20 @@ class SLAM:
             info["frontview_coverage_recovery"] = scene_mapper_meta[
                 "frontview_coverage_recovery"
             ]
+        if "causal_metric_birth" in scene_mapper_meta:
+            info["causal_metric_birth"] = scene_mapper_meta[
+                "causal_metric_birth"
+            ]
+        if "causal_persistent_landmark_memory" in scene_mapper_meta:
+            info["causal_persistent_landmark_memory"] = scene_mapper_meta[
+                "causal_persistent_landmark_memory"
+            ]
+        if "causal_dual_responsibility" in scene_mapper_meta:
+            info["causal_dual_responsibility"] = scene_mapper_meta[
+                "causal_dual_responsibility"
+            ]
+        if "causal_depth_audit" in scene_mapper_meta:
+            info["causal_depth_audit"] = scene_mapper_meta["causal_depth_audit"]
         if "frontview_directional_layer" in scene_mapper_meta:
             info["frontview_directional_layer"] = scene_mapper_meta[
                 "frontview_directional_layer"
@@ -107,6 +128,42 @@ class SLAM:
         if "streaming_appearance_lod" in scene_mapper_meta:
             info["streaming_appearance_lod"] = scene_mapper_meta[
                 "streaming_appearance_lod"
+            ]
+        if "tgbr_frequency_schedule" in scene_mapper_meta:
+            info["tgbr_frequency_schedule"] = scene_mapper_meta[
+                "tgbr_frequency_schedule"
+            ]
+        if "tgbr_directional_step_budget" in scene_mapper_meta:
+            info["tgbr_directional_step_budget"] = scene_mapper_meta[
+                "tgbr_directional_step_budget"
+            ]
+        if "tgbr_directional_view_budget" in scene_mapper_meta:
+            info["tgbr_directional_view_budget"] = scene_mapper_meta[
+                "tgbr_directional_view_budget"
+            ]
+        if "tgbr_optimization_budget" in scene_mapper_meta:
+            info["tgbr_optimization_budget"] = scene_mapper_meta[
+                "tgbr_optimization_budget"
+            ]
+        if "tgbr_exact_replay" in scene_mapper_meta:
+            info["tgbr_exact_replay"] = scene_mapper_meta[
+                "tgbr_exact_replay"
+            ]
+        if "tgbr_spectral_replay" in scene_mapper_meta:
+            info["tgbr_spectral_replay"] = scene_mapper_meta[
+                "tgbr_spectral_replay"
+            ]
+        if "tgbr_spectral_residency" in scene_mapper_meta:
+            info["tgbr_spectral_residency"] = scene_mapper_meta[
+                "tgbr_spectral_residency"
+            ]
+        if "tgbr_replay_residency" in scene_mapper_meta:
+            info["tgbr_replay_residency"] = scene_mapper_meta[
+                "tgbr_replay_residency"
+            ]
+        if "cuda_memory_profile" in scene_mapper_meta:
+            info["cuda_memory_profile"] = scene_mapper_meta[
+                "cuda_memory_profile"
             ]
         if "frontview_track_fusion" in scene_mapper_meta:
             info["frontview_track_fusion"] = scene_mapper_meta[
@@ -166,8 +223,20 @@ if __name__ == "__main__":
         default=None,
         help="Optional reproducible Python/NumPy/Torch seed.",
     )
+    parser.add_argument(
+        "--cpu_threads",
+        type=int,
+        default=None,
+        help="Optional per-process PyTorch CPU thread limit.",
+    )
 
     args = parser.parse_args(sys.argv[1:])
+
+    if args.cpu_threads is not None:
+        if args.cpu_threads <= 0:
+            parser.error("--cpu_threads must be positive")
+        torch.set_num_threads(args.cpu_threads)
+        torch.set_num_interop_threads(args.cpu_threads)
 
     if args.seed is not None:
         random.seed(args.seed)

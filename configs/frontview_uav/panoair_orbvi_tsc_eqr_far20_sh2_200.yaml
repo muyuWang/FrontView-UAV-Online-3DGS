@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_eqr_sh2_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-eqr-far20-sh2-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-eqr-far20-sh2-200"
+
+FrontViewScaleCover:
+  quota_min_depth_m: 20.0

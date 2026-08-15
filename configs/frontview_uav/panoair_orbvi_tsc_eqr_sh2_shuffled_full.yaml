@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_eqr_sh2_full.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-eqr-sh2-shuffled-full"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-eqr-sh2-shuffled-full"
+
+FrontViewScaleCover:
+  shuffle_evidence_quota: true

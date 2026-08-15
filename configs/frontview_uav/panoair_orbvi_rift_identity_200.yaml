@@ -1,0 +1,18 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pbsd_hashless_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-rift-identity-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-rift-identity-200"
+
+FrontViewIdentityLOD:
+  enabled: true
+  mode: "identity_only"
+  projective_cell_px: 12.0
+  min_image_gate_px: 2.0
+  max_image_gate_px: 12.0
+  radius_gate_scale: 0.75
+  depth_ratio: 1.08
+  uncertainty_scale: 1.0
+  refill_depthcov_budget: true

@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_residual_utility_budget1_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-residual-mix25-budget1-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-residual-mix25-budget1-200"
+
+FrontViewResidualCover:
+  selection_mode: "utility_mix"
+  utility_fraction: 0.25

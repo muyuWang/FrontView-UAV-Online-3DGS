@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_covlod_floor10_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-covlod-floor10-shuffled-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-covlod-floor10-shuffled-200"
+
+FrontViewResidualCover:
+  shuffle_covariance: true

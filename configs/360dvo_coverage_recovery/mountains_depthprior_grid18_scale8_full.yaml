@@ -1,0 +1,11 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_coverage_recovery/mountains_full.yaml
+
+Dataset:
+  name: 360DVO-CoverageRecoveryGrid18Scale8-mountains
+
+Testset:
+  name: 360DVO-CoverageRecoveryGrid18Scale8-mountains
+
+FrontViewCoverageRecovery:
+  depth_fallback_map_enabled: false
+  depth_fallback_scale_multiplier: 8.0

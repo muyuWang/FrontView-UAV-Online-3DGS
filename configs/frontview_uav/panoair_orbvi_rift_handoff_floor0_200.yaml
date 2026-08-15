@@ -1,0 +1,19 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_rift_footprint_dense_l2_allres_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-rift-handoff-floor0-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-rift-handoff-floor0-200"
+
+Model:
+  extra_pts_num: 2500
+
+FrontViewIdentityLOD:
+  render_handoff_enabled: true
+  handoff_radius_start_px: 4.0
+  handoff_radius_end_px: 8.0
+  handoff_full_children: 4
+  handoff_parent_floor: 0.0
+  handoff_batch_reduce: "max"
+  shuffle_handoff: false

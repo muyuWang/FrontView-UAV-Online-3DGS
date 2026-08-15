@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_pfc_pfh_r0p5_gpu_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-pfh-r0p5-gpu-shuffled-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-pfh-r0p5-gpu-shuffled-200"
+
+FrontViewScaleCover:
+  shuffle_projected_handoff: true

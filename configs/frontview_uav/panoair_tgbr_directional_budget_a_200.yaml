@@ -1,0 +1,15 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_compute_routed_warmup10_fp16_cap60_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-directional-budget-a-200"
+
+Testset:
+  name: "PanoAir-tgbr-directional-budget-a-200"
+
+StreamingAppearanceLOD:
+  directional_step_budget_enabled: true
+  directional_step_budget_warmup_keyframes: 8
+  directional_step_budget_very_low_degrees: 0.50
+  directional_step_budget_low_degrees: 1.25
+  directional_step_budget_very_low_steps: 6
+  directional_step_budget_low_steps: 8

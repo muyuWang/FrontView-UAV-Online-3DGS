@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_directional_views_percentile_aggressive_full.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-directional-views-percentile-balanced-full"
+
+Testset:
+  name: "PanoAir-tgbr-directional-views-percentile-balanced-full"
+
+StreamingAppearanceLOD:
+  directional_view_budget_sampling_mode: "cyclic_balanced"

@@ -1,0 +1,15 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_residual_utility_budget1_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-residual-retire-opacity-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-residual-retire-opacity-200"
+
+FrontViewResidualCover:
+  retirement_enabled: true
+  retirement_capacity_base: 35000
+  retirement_capacity_per_frame: 255.0
+  retirement_min_age_frames: 100
+  retirement_expansion_weight: 0.0
+  shuffle_retirement: false

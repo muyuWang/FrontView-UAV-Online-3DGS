@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_cgbr75_sh3_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-cgbr75-sh3-shuffled-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-cgbr75-sh3-shuffled-200"
+
+StreamingAppearanceLOD:
+  selection_mode: "gradient_shuffled"

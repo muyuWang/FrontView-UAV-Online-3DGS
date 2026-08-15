@@ -1,0 +1,17 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_residual_utility_budget1_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-pcra-s3-r1p5-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-pcra-s3-r1p5-200"
+
+FrontViewResidualCover:
+  use_covariance_lod: false
+  covariance_competition_enabled: true
+  covariance_neighbors: 8
+  covariance_overlap_sigma: 3.0
+  covariance_refinement_ratio: 2.0
+  covariance_refinement_min_radius_px: 1.5
+  covariance_opacity_min: 0.01
+  shuffle_covariance_competition: false

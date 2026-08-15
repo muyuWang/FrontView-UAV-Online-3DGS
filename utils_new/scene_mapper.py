@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import json
+import math
 import time
 from os.path import join as pjoin
 
@@ -30,6 +31,7 @@ from utils_new.camera_utils import (
 )
 from utils_new.appearance_lod import AppearanceLODEvidence
 from utils_new.appearance_anchor import AppearanceProximalAnchor
+from utils_new.causal_depth_audit import validate_causal_depth_audit_config
 from utils_new.frame_checker import FrameChecker
 from utils_new.frontview_observability import (
     validate_front_view_observability_config,
@@ -37,7 +39,19 @@ from utils_new.frontview_observability import (
 from utils_new.frontview_coverage_recovery import (
     coverage_recovery_certificate,
     pose_novelty,
+    projective_coverage_debt,
+    projective_exposure_budget,
     validate_front_view_coverage_recovery_config,
+)
+from utils_new.frontview_causal_metric_birth import (
+    validate_causal_metric_birth_config,
+)
+from utils_new.frontview_causal_landmark_memory import (
+    validate_causal_landmark_memory_config,
+)
+from utils_new.frontview_dual_responsibility import (
+    geometry_decision_render,
+    validate_causal_dual_responsibility_config,
 )
 from utils_new.frontview_directional_layer import (
     DIRECTIONAL_LAYER_FILENAME,
@@ -49,6 +63,9 @@ from utils_new.frontview_depth_transport import (
 )
 from utils_new.frontview_birth import validate_front_view_birth_config
 from utils_new.frontview_far_field import validate_front_view_far_field_config
+from utils_new.frontview_inverse_depth_certificate import (
+    validate_front_view_inverse_depth_certificate_config,
+)
 from utils_new.frontview_identity_lod import (
     validate_front_view_identity_lod_config,
 )
@@ -63,7 +80,16 @@ from utils_new.frontview_track_fusion import (
     validate_front_view_track_fusion_config,
 )
 from utils_new.streaming_appearance_lod import (
+    directional_compact_view_steps,
+    directional_step_budget,
+    exact_replay_microbatch_ranges,
+    frequency_consistent_step_levels,
+    merge_replay_projection_info,
+    optimization_tail_certificate,
+    spectral_replay_microbatch_limit,
+    spectral_residency_limit,
     validate_streaming_appearance_lod_config,
+    view_direction_novelty_degrees,
 )
 from utils_new.kf_graph import cal_cams_covisibility, KFGraph
 from utils_new.logging_utils import Log
@@ -110,6 +136,20 @@ class SceneMapper(mp.Process):
     def __init__(self, configs):
         super(SceneMapper, self).__init__()
         self.configs = configs
+        self.causal_depth_audit_config = validate_causal_depth_audit_config(
+            configs.get("CausalDepthAudit")
+        )
+        configs["CausalDepthAudit"] = self.causal_depth_audit_config
+        self.causal_depth_audit_active = False
+        self.causal_depth_audit_stats = {
+            "enabled": bool(self.causal_depth_audit_config["enabled"]),
+            "activation_frame": None,
+            "boundary_groups": 0,
+            "boundary_gaussians": 0,
+            "isolated_group_id": None,
+            "birth_calls_skipped": 0,
+            "prune_calls_skipped": 0,
+        }
         self.frontview_observability_config = (
             validate_front_view_observability_config(
                 configs.get("FrontViewObservability")
@@ -123,6 +163,26 @@ class SceneMapper(mp.Process):
         )
         configs["FrontViewCoverageRecovery"] = (
             self.frontview_coverage_recovery_config
+        )
+        self.causal_metric_birth_config = validate_causal_metric_birth_config(
+            configs.get("CausalMetricBirth")
+        )
+        configs["CausalMetricBirth"] = self.causal_metric_birth_config
+        self.causal_landmark_memory_config = (
+            validate_causal_landmark_memory_config(
+                configs.get("CausalPersistentLandmarkMemory")
+            )
+        )
+        configs["CausalPersistentLandmarkMemory"] = (
+            self.causal_landmark_memory_config
+        )
+        self.causal_dual_responsibility_config = (
+            validate_causal_dual_responsibility_config(
+                configs.get("CausalDualResponsibility")
+            )
+        )
+        configs["CausalDualResponsibility"] = (
+            self.causal_dual_responsibility_config
         )
         self.frontview_directional_layer_config = (
             validate_front_view_directional_layer_config(
@@ -144,6 +204,13 @@ class SceneMapper(mp.Process):
             "mean_residual_sum": 0.0,
             "translation_sum_m": 0.0,
             "rotation_sum_deg": 0.0,
+            "projective_debt_checks": 0,
+            "projective_debt_sum": 0.0,
+            "last_projective_debt": None,
+            "last_projective_displacement_px": None,
+            "projective_cell_px": None,
+            "projective_exposure_budget_sum": 0,
+            "last_projective_exposure_budget": None,
             "last_admitted_translation_m": 0.0,
             "newborn_refinement_calls": 0,
             "newborn_refinement_steps": 0,
@@ -177,6 +244,14 @@ class SceneMapper(mp.Process):
             configs.get("FrontViewFarField")
         )
         configs["FrontViewFarField"] = self.frontview_far_field_config
+        self.frontview_inverse_depth_certificate_config = (
+            validate_front_view_inverse_depth_certificate_config(
+                configs.get("FrontViewInverseDepthCertificate")
+            )
+        )
+        configs["FrontViewInverseDepthCertificate"] = (
+            self.frontview_inverse_depth_certificate_config
+        )
         self.frontview_identity_lod_config = (
             validate_front_view_identity_lod_config(
                 configs.get("FrontViewIdentityLOD")
@@ -199,6 +274,198 @@ class SceneMapper(mp.Process):
             )
         )
         configs["StreamingAppearanceLOD"] = self.streaming_appearance_lod_config
+        self.tgbr_frequency_schedule_stats = {
+            "enabled": bool(
+                self.streaming_appearance_lod_config["frequency_schedule_enabled"]
+            ),
+            "schedule_calls": 0,
+            "optimization_steps": 0,
+            "base_only_steps": 0,
+            "rendered_views": 0,
+            "rendered_pixels": 0,
+            "full_resolution_equivalent_pixels": 0,
+            "level_steps": {str(level): 0 for level in range(4)},
+            "level_view_pixels": {str(level): 0 for level in range(4)},
+        }
+        self.tgbr_previous_keyframe_pose = None
+        self.tgbr_directional_novelty_history = []
+        self.tgbr_directional_step_budget_stats = {
+            "enabled": bool(
+                self.streaming_appearance_lod_config[
+                    "directional_step_budget_enabled"
+                ]
+            ),
+            "selection_mode": self.streaming_appearance_lod_config[
+                "directional_step_budget_selection_mode"
+            ],
+            "keyframes": 0,
+            "full_keyframes": 0,
+            "low_keyframes": 0,
+            "very_low_keyframes": 0,
+            "full_budget_steps": 0,
+            "executed_steps": 0,
+            "saved_steps": 0,
+            "finite_novelty_keyframes": 0,
+            "novelty_degrees_sum": 0.0,
+            "novelty_degrees_min": None,
+            "novelty_degrees_max": None,
+            "rotation_degrees_sum": 0.0,
+            "parallax_degrees_sum": 0.0,
+            "finite_percentile_keyframes": 0,
+            "novelty_percentile_sum": 0.0,
+            "lr_compensated_keyframes": 0,
+            "lr_scale_sum": 0.0,
+        }
+        self.tgbr_directional_view_budget_stats = {
+            "enabled": bool(
+                self.streaming_appearance_lod_config[
+                    "directional_view_budget_enabled"
+                ]
+            ),
+            "selection_mode": self.streaming_appearance_lod_config[
+                "directional_view_budget_selection_mode"
+            ],
+            "keyframes": 0,
+            "full_keyframes": 0,
+            "low_keyframes": 0,
+            "very_low_keyframes": 0,
+            "compact_steps_requested": 0,
+            "compact_steps_executed": 0,
+            "optimization_steps": 0,
+            "rendered_views": 0,
+            "full_view_equivalent_views": 0,
+            "finite_novelty_keyframes": 0,
+            "novelty_degrees_sum": 0.0,
+            "novelty_degrees_min": None,
+            "novelty_degrees_max": None,
+            "rotation_degrees_sum": 0.0,
+            "parallax_degrees_sum": 0.0,
+            "finite_percentile_keyframes": 0,
+            "novelty_percentile_sum": 0.0,
+        }
+        self.tgbr_exact_replay_stats = {
+            "enabled": bool(
+                self.streaming_appearance_lod_config[
+                    "exact_replay_microbatch_size"
+                ]
+                > 0
+            ),
+            "microbatch_size": int(
+                self.streaming_appearance_lod_config[
+                    "exact_replay_microbatch_size"
+                ]
+            ),
+            "gaussian_view_budget": int(
+                self.streaming_appearance_lod_config[
+                    "exact_replay_gaussian_view_budget"
+                ]
+            ),
+            "optimization_steps": 0,
+            "microbatched_steps": 0,
+            "logical_views": 0,
+            "render_batches": 0,
+            "max_logical_views": 0,
+            "max_render_batch_views": 0,
+            "min_render_batch_limit": None,
+        }
+        self.tgbr_spectral_replay_stats = {
+            "enabled": bool(
+                self.streaming_appearance_lod_config["spectral_replay_enabled"]
+            ),
+            "basis_budget_per_gaussian": float(
+                self.streaming_appearance_lod_config[
+                    "spectral_replay_basis_budget"
+                ]
+            ),
+            "max_views": int(
+                self.streaming_appearance_lod_config["spectral_replay_max_views"]
+            ),
+            "routing_calls": 0,
+            "mean_basis_terms_sum": 0.0,
+            "selected_view_limit_sum": 0,
+            "min_selected_view_limit": None,
+            "max_selected_view_limit": 0,
+        }
+        self.tgbr_spectral_residency_stats = {
+            "enabled": bool(
+                self.streaming_appearance_lod_config[
+                    "spectral_residency_enabled"
+                ]
+            ),
+            "basis_budget": float(
+                self.streaming_appearance_lod_config[
+                    "spectral_residency_basis_budget"
+                ]
+            ),
+            "max_views": int(
+                self.streaming_appearance_lod_config[
+                    "spectral_residency_max_views"
+                ]
+            ),
+            "enforcement_calls": 0,
+            "evicted_views": 0,
+            "stage_requests": 0,
+            "staged_view_transfers": 0,
+            "staged_observation_bytes": 0,
+            "max_staged_observation_bytes": 0,
+            "resident_cache_hits": 0,
+            "min_resident_limit": None,
+            "max_resident_limit": 0,
+            "final_resident_limit": 0,
+            "final_resident_views": 0,
+            "history_keyframes": 0,
+            "final_resident_observation_bytes": 0,
+            "max_resident_observation_bytes": 0,
+            "max_realized_basis_view_product": 0.0,
+            "mean_active_basis_terms_sum": 0.0,
+        }
+        self.tgbr_optimization_budget_stats = {
+            "enabled": bool(
+                self.streaming_appearance_lod_config[
+                    "optimization_budget_routing_enabled"
+                ]
+            ),
+            "optimization_calls": 0,
+            "warmup_calls": 0,
+            "certificate_checks": 0,
+            "certified_calls": 0,
+            "full_budget_steps": 0,
+            "executed_steps": 0,
+            "saved_steps": 0,
+            "collapsed_optimizer_steps": 0,
+            "collapsed_camera_steps": 0,
+            "collapsed_replay_scheduler_steps": 0,
+            "gain_collapsed_optimizer_steps": 0,
+            "learning_rate_gain_sum": 0.0,
+            "gradient_decay_sum": 0.0,
+            "tail_rejections": 0,
+            "high_band_rejections": 0,
+            "nondecaying_rejections": 0,
+            "invalid_rejections": 0,
+            "relative_tail_bound_sum": 0.0,
+            "relative_tail_bound_max": 0.0,
+            "finite_tail_checks": 0,
+            "finite_high_band_checks": 0,
+            "high_band_gradient_ratio_sum": 0.0,
+            "high_band_gradient_ratio_max": 0.0,
+            "stop_step_histogram": {},
+        }
+        cuda_profile_config = configs.get("CudaMemoryProfile", {})
+        self.cuda_memory_profile_enabled = bool(
+            cuda_profile_config.get("enabled", False)
+        )
+        cuda_profile_device = configs["Mapper"]["device"]
+        self.cuda_memory_profile_stats = {
+            "enabled": self.cuda_memory_profile_enabled,
+            "overall_peak_allocated_bytes": int(
+                torch.cuda.max_memory_allocated(cuda_profile_device)
+            ),
+            "overall_peak_reserved_bytes": int(
+                torch.cuda.max_memory_reserved(cuda_profile_device)
+            ),
+            "stage_peak_allocated_bytes": {},
+            "stage_peak_reserved_bytes": {},
+        }
         self.frontview_sparse_scale_map_config = (
             validate_front_view_sparse_scale_map_config(
                 configs.get("FrontViewSparseScaleMap")
@@ -268,6 +535,10 @@ class SceneMapper(mp.Process):
         self.cur_view = None
         self.current_frame_coverage_recovered = False
         self.current_frame_coverage_recovery_translation_m = None
+        self.current_frame_coverage_recovery_budget = None
+        self.coverage_recovery_dropout_pose = None
+        self.coverage_recovery_accumulated_debt = 0.0
+        self.coverage_recovery_accumulated_displacement_px = 0.0
         self.last_coverage_recovery_commit = None
         self.active_coverage_recovery_group_id = None
         self.active_coverage_recovery_birth_frame = -1
@@ -320,6 +591,14 @@ class SceneMapper(mp.Process):
         self.aerocommit_config = validate_aerocommit_config(
             configs.get("AeroCommit")
         )
+        if self.causal_dual_responsibility_config["enabled"] and (
+            self.progressive_manager is not None
+            or self.aerocommit_config["enabled"]
+        ):
+            raise ValueError(
+                "CausalDualResponsibility currently requires immediate online "
+                "commit without legacy archival ownership"
+            )
         if (
             (
                 self.frontview_identity_lod_config["enabled"]
@@ -491,11 +770,35 @@ class SceneMapper(mp.Process):
 
         self.use_multi_reso = configs["Mapper"]["use_multi_reso"]
 
-        self.pin_kf_gpu = (
-            configs["Mapper"]["pin_kf_gpu"]
-            if "pin_kf_gpu" in configs["Mapper"]
-            else False
-        )  # whether pin key frames to gpu
+        configured_pin_kf_gpu = bool(configs["Mapper"].get("pin_kf_gpu", False))
+        bounded_replay_residency = bool(
+            self.streaming_appearance_lod_config[
+                "bounded_replay_residency_enabled"
+            ]
+        )
+        spectral_residency = bool(
+            self.streaming_appearance_lod_config["spectral_residency_enabled"]
+        )
+        self.pin_kf_gpu = configured_pin_kf_gpu and not (
+            bounded_replay_residency or spectral_residency
+        )
+        self.tgbr_replay_residency_stats = {
+            "enabled": bounded_replay_residency,
+            "policy": (
+                "bounded_causal_replay"
+                if bounded_replay_residency
+                else "mapper_default"
+            ),
+            "configured_pin_kf_gpu": configured_pin_kf_gpu,
+            "effective_pin_kf_gpu": self.pin_kf_gpu,
+            "staged_replay_batches": 0,
+            "staged_replay_views": 0,
+            "max_simultaneous_staged_views": 0,
+            "max_simultaneous_staged_observation_bytes": 0,
+            "history_keyframes": 0,
+            "final_persistent_gpu_history_count": None,
+            "final_persistent_gpu_observation_bytes": None,
+        }
 
         self.save_exr = self.configs["Results"]["save_exr"]
 
@@ -705,7 +1008,7 @@ class SceneMapper(mp.Process):
         start_time = time.perf_counter()
         config = self.aerocommit_config["surface_detail"]
         image = cam.get_gt_image(0)
-        rendered = render_pkg["render"]
+        rendered = geometry_decision_render(render_pkg)
         depth = render_pkg["depth"]
         opacity = render_pkg["opacity"]
         if depth.ndim == 3:
@@ -993,6 +1296,365 @@ class SceneMapper(mp.Process):
             torch.device(self.device), torch.float32, cameras=cameras
         )
 
+    def _exact_replay_microbatch_backward(
+        self,
+        iter_window,
+        iter_gt_imgs,
+        iter_gt_depths,
+        step_level,
+        appearance_probe,
+        coarse_sh_degree,
+        current_index,
+        capture_current,
+        microbatch_size,
+        include_progressive_regularization=True,
+    ):
+        """Backpropagate the complete replay objective with bounded view memory."""
+
+        ranges = exact_replay_microbatch_ranges(
+            len(iter_window),
+            microbatch_size,
+        )
+        stats = self.tgbr_exact_replay_stats
+        stats["optimization_steps"] += 1
+        stats["logical_views"] += len(iter_window)
+        stats["render_batches"] += len(ranges)
+        stats["max_logical_views"] = max(
+            int(stats["max_logical_views"]), len(iter_window)
+        )
+        stats["max_render_batch_views"] = max(
+            int(stats["max_render_batch_views"]),
+            max((end - begin for begin, end in ranges), default=0),
+        )
+        stats["min_render_batch_limit"] = (
+            int(microbatch_size)
+            if stats["min_render_batch_limit"] is None
+            else min(int(stats["min_render_batch_limit"]), int(microbatch_size))
+        )
+        if len(ranges) > 1:
+            stats["microbatched_steps"] += 1
+
+        total_views = len(iter_window)
+        total_valid_depth = (
+            int((iter_gt_depths > 0).sum().item())
+            if self.depth_loss.depth_weight > 0
+            else 0
+        )
+        l1_values = []
+        projection_records = []
+        current_render_pkg = None
+        reported_loss = 0.0
+
+        for begin, end in ranges:
+            cameras = iter_window[begin:end]
+            gt_images = iter_gt_imgs[begin:end]
+            gt_depths = iter_gt_depths[begin:end]
+            render_pkg = self.gaussians.render_batch(
+                cameras,
+                self.use_random_bg,
+                level=step_level,
+                external_splats=self.get_stable_external_splats(cameras),
+                appearance_probe=appearance_probe,
+                appearance_sh_degree_override=coarse_sh_degree,
+            )
+            render = geometry_decision_render(render_pkg)
+            render_depth = render_pkg["depth"].squeeze(-1)
+            invalid_gt = (
+                torch.sum(gt_images, dim=-1, keepdim=True) <= 0.0000001
+            ).float()
+            gt_images = gt_images * (1.0 - invalid_gt) + render * invalid_gt
+
+            loss_img, chunk_l1_values = self.image_loss(render, gt_images)
+            l1_values.extend(chunk_l1_values)
+            view_fraction = float(end - begin) / float(total_views)
+            chunk_loss = view_fraction * loss_img
+
+            if self.depth_loss.depth_weight > 0:
+                valid_depth = int((gt_depths > 0).sum().item())
+                if valid_depth and total_valid_depth:
+                    chunk_loss = chunk_loss + (
+                        float(valid_depth) / float(total_valid_depth)
+                    ) * self.depth_loss(render_depth, gt_depths)
+
+            render_normal = None
+            if self.normal_reg_loss.normal_reg_weight > 0.0:
+                render_normal = convert_depth_to_normal(
+                    render_depth.view(
+                        render_depth.shape[0],
+                        1,
+                        render_depth.shape[1],
+                        render_depth.shape[2],
+                    ),
+                    cameras[0].get_int_mat(step_level),
+                )
+            loss_normal_reg, color_mask = self.normal_reg_loss(
+                render_normal, gt_images.permute(0, 3, 1, 2)
+            )
+            chunk_loss = chunk_loss + view_fraction * loss_normal_reg
+
+            if (
+                "normal" in render_pkg
+                and "normal_from_depth" in render_pkg
+                and "opacity" in render_pkg
+            ):
+                chunk_loss = chunk_loss + view_fraction * self.normal_loss(
+                    render_pkg["normal"],
+                    render_pkg["normal_from_depth"],
+                    render_pkg["opacity"],
+                )
+            if "distortion" in render_pkg:
+                chunk_loss = chunk_loss + view_fraction * self.distortion_loss(
+                    render_pkg["distortion"]
+                )
+
+            chunk_loss.backward()
+            reported_loss += float(chunk_loss.detach().item())
+
+            if self.streaming_appearance_lod_config["enabled"] and capture_current:
+                projection = render_pkg.get("projection_info")
+                if projection is not None:
+                    projection_records.append(
+                        (
+                            begin,
+                            {
+                                key: value.detach()
+                                for key, value in projection.items()
+                                if key in {"gaussian_ids", "camera_ids", "radii", "depths"}
+                                and torch.is_tensor(value)
+                            },
+                        )
+                    )
+
+            if capture_current and begin <= current_index < end:
+                local_index = current_index - begin
+                current_render_pkg = {
+                    "gt": gt_images[local_index].detach(),
+                    "sparse_depth": gt_depths[local_index].detach(),
+                    "render": render[local_index].detach(),
+                    "opacity": render_pkg["opacity"][local_index].detach(),
+                }
+                for key in ("depth", "normal", "normal_from_depth", "distortion"):
+                    if key in render_pkg:
+                        current_render_pkg[key] = render_pkg[key][
+                            local_index
+                        ].detach()
+                if color_mask is not None:
+                    current_render_pkg["color_mask"] = color_mask[
+                        local_index
+                    ].unsqueeze(-1).detach()
+
+        regularization = self.gaussian_loss(self.gaussians)
+        if include_progressive_regularization and self.progressive_manager is not None:
+            regularization = (
+                regularization
+                + self.progressive_manager.surface_regularization_loss()
+            )
+        if torch.is_tensor(regularization) and regularization.requires_grad:
+            regularization.backward()
+        if torch.is_tensor(regularization):
+            reported_loss += float(regularization.detach().item())
+
+        return (
+            l1_values,
+            merge_replay_projection_info(projection_records),
+            current_render_pkg,
+            reported_loss,
+        )
+
+    def _exact_replay_batch_limit(self):
+        if self.streaming_appearance_lod_config["spectral_replay_enabled"]:
+            target_fraction = float(
+                self.gaussians.streaming_appearance_lod_stats.get(
+                    "current_target_fraction", 0.0
+                )
+            )
+            microbatch_size, mean_terms = spectral_replay_microbatch_limit(
+                target_fraction,
+                self.streaming_appearance_lod_config,
+            )
+            stats = self.tgbr_spectral_replay_stats
+            stats["routing_calls"] += 1
+            stats["mean_basis_terms_sum"] += float(mean_terms)
+            stats["selected_view_limit_sum"] += int(microbatch_size)
+            stats["min_selected_view_limit"] = (
+                int(microbatch_size)
+                if stats["min_selected_view_limit"] is None
+                else min(int(stats["min_selected_view_limit"]), int(microbatch_size))
+            )
+            stats["max_selected_view_limit"] = max(
+                int(stats["max_selected_view_limit"]), int(microbatch_size)
+            )
+            return microbatch_size
+        microbatch_size = int(
+            self.streaming_appearance_lod_config[
+                "exact_replay_microbatch_size"
+            ]
+        )
+        gaussian_view_budget = int(
+            self.streaming_appearance_lod_config[
+                "exact_replay_gaussian_view_budget"
+            ]
+        )
+        if microbatch_size > 0 and gaussian_view_budget > 0:
+            microbatch_size = min(
+                microbatch_size,
+                max(
+                    1,
+                    gaussian_view_budget
+                    // max(1, self.gaussians.get_num_gaussians),
+                ),
+            )
+        return microbatch_size
+
+    def _cuda_memory_profile_begin(self):
+        if not self.cuda_memory_profile_enabled:
+            return
+        torch.cuda.reset_peak_memory_stats(self.device)
+
+    def _cuda_memory_profile_end(self, stage):
+        if not self.cuda_memory_profile_enabled:
+            return
+        allocated = int(torch.cuda.max_memory_allocated(self.device))
+        reserved = int(torch.cuda.max_memory_reserved(self.device))
+        stats = self.cuda_memory_profile_stats
+        stats["overall_peak_allocated_bytes"] = max(
+            int(stats["overall_peak_allocated_bytes"]), allocated
+        )
+        stats["overall_peak_reserved_bytes"] = max(
+            int(stats["overall_peak_reserved_bytes"]), reserved
+        )
+        allocated_stages = stats["stage_peak_allocated_bytes"]
+        reserved_stages = stats["stage_peak_reserved_bytes"]
+        allocated_stages[stage] = max(int(allocated_stages.get(stage, 0)), allocated)
+        reserved_stages[stage] = max(int(reserved_stages.get(stage, 0)), reserved)
+
+    @staticmethod
+    def _camera_observation_tensors(camera):
+        return tuple(camera.gt_imgs) + tuple(camera.sparse_depths) + tuple(
+            camera.sparse_point_ids
+        )
+
+    @classmethod
+    def _camera_gpu_observation_bytes(cls, camera):
+        return sum(
+            int(tensor.numel()) * int(tensor.element_size())
+            for tensor in cls._camera_observation_tensors(camera)
+            if tensor.device.type == "cuda"
+        )
+
+    def _record_tgbr_replay_residency(self, cameras):
+        if not self.tgbr_replay_residency_stats["enabled"]:
+            return
+        unique_cameras = list({id(camera): camera for camera in cameras}.values())
+        stats = self.tgbr_replay_residency_stats
+        stats["staged_replay_batches"] += 1
+        stats["staged_replay_views"] += len(unique_cameras)
+        stats["max_simultaneous_staged_views"] = max(
+            int(stats["max_simultaneous_staged_views"]), len(unique_cameras)
+        )
+        observation_bytes = sum(
+            self._camera_gpu_observation_bytes(camera)
+            for camera in unique_cameras
+        )
+        stats["max_simultaneous_staged_observation_bytes"] = max(
+            int(stats["max_simultaneous_staged_observation_bytes"]),
+            observation_bytes,
+        )
+
+    def _stage_camera_for_optimization(self, camera):
+        config = self.streaming_appearance_lod_config
+        before = self._camera_gpu_observation_bytes(camera)
+        camera.to_device(self.device)
+        if not config["spectral_residency_enabled"]:
+            return
+        after = self._camera_gpu_observation_bytes(camera)
+        stats = self.tgbr_spectral_residency_stats
+        stats["stage_requests"] += 1
+        if before > 0:
+            stats["resident_cache_hits"] += 1
+        elif after > 0:
+            stats["staged_view_transfers"] += 1
+            stats["staged_observation_bytes"] += int(after)
+            stats["max_staged_observation_bytes"] = max(
+                int(stats["max_staged_observation_bytes"]), int(after)
+            )
+
+    def _spectral_resident_camera_ids(self):
+        config = self.streaming_appearance_lod_config
+        if not config["spectral_residency_enabled"]:
+            return set(), 0, 0.0
+        target_fraction = float(
+            self.gaussians.streaming_appearance_lod_stats.get(
+                "current_target_fraction", 0.0
+            )
+        )
+        limit, mean_terms = spectral_residency_limit(target_fraction, config)
+        cameras = self.kf_graph.kf_cameras[-limit:]
+        return {int(camera.cam_idx) for camera in cameras}, limit, mean_terms
+
+    def _keep_spectral_resident(self, camera):
+        resident_ids, _, _ = self._spectral_resident_camera_ids()
+        return int(camera.cam_idx) in resident_ids
+
+    def _enforce_spectral_residency(self):
+        if not self.streaming_appearance_lod_config["spectral_residency_enabled"]:
+            return
+        resident_ids, limit, mean_terms = self._spectral_resident_camera_ids()
+        stats = self.tgbr_spectral_residency_stats
+        evicted = 0
+        for camera in self.kf_graph.kf_cameras:
+            if int(camera.cam_idx) in resident_ids:
+                continue
+            if self._camera_gpu_observation_bytes(camera) > 0:
+                camera.to_device("cpu")
+                evicted += 1
+        resident_cameras = [
+            camera
+            for camera in self.kf_graph.kf_cameras
+            if int(camera.cam_idx) in resident_ids
+            and self._camera_gpu_observation_bytes(camera) > 0
+        ]
+        resident_bytes = sum(
+            self._camera_gpu_observation_bytes(camera)
+            for camera in resident_cameras
+        )
+        stats["enforcement_calls"] += 1
+        stats["evicted_views"] += evicted
+        stats["min_resident_limit"] = (
+            int(limit)
+            if stats["min_resident_limit"] is None
+            else min(int(stats["min_resident_limit"]), int(limit))
+        )
+        stats["max_resident_limit"] = max(
+            int(stats["max_resident_limit"]), int(limit)
+        )
+        stats["final_resident_limit"] = int(limit)
+        stats["final_resident_views"] = len(resident_cameras)
+        stats["history_keyframes"] = len(self.kf_graph.kf_cameras)
+        stats["final_resident_observation_bytes"] = int(resident_bytes)
+        stats["max_resident_observation_bytes"] = max(
+            int(stats["max_resident_observation_bytes"]), int(resident_bytes)
+        )
+        stats["max_realized_basis_view_product"] = max(
+            float(stats["max_realized_basis_view_product"]),
+            float(limit) * float(mean_terms),
+        )
+        stats["mean_active_basis_terms_sum"] += float(mean_terms)
+
+    def _finalize_tgbr_replay_residency(self):
+        if not self.tgbr_replay_residency_stats["enabled"]:
+            return
+        history = list(self.kf_graph.kf_cameras)
+        resident_bytes = [
+            self._camera_gpu_observation_bytes(camera) for camera in history
+        ]
+        stats = self.tgbr_replay_residency_stats
+        stats["history_keyframes"] = len(history)
+        stats["final_persistent_gpu_history_count"] = sum(
+            observation_bytes > 0 for observation_bytes in resident_bytes
+        )
+        stats["final_persistent_gpu_observation_bytes"] = sum(resident_bytes)
+
     # Optimize gaussians (do not densify or prune)
     def optimize(
         self,
@@ -1004,6 +1666,9 @@ class SceneMapper(mp.Process):
         optimize_pose=True,
         supplemental=False,
         views_override=None,
+        compact_view_steps=0,
+        compact_view_count=0,
+        record_directional_view_budget=False,
     ):
         if len(self.active_window) == 0:
             return
@@ -1021,7 +1686,7 @@ class SceneMapper(mp.Process):
         if views_override is not None:
             for cam in views_override:
                 if cam.cam_idx not in exist_idx:
-                    cam.to_device(self.device)
+                    self._stage_camera_for_optimization(cam)
                     optimized_local_window.append(cam)
                     used_cams.append(cam)
                     exist_idx.append(cam.cam_idx)
@@ -1034,14 +1699,14 @@ class SceneMapper(mp.Process):
                 optimized_local_window
             ) - 1
         elif current_view_only:
-            self.cur_view.to_device(self.device)
+            self._stage_camera_for_optimization(self.cur_view)
             optimized_local_window = [self.cur_view]
             used_cams = [self.cur_view]
             exist_idx = [self.cur_view.cam_idx]
         else:
             for cam in self.active_window:
                 if cam.cam_idx not in exist_idx:
-                    cam.to_device(self.device)
+                    self._stage_camera_for_optimization(cam)
                     optimized_local_window.append(cam)
                     used_cams.append(cam)
                     exist_idx.append(cam.cam_idx)
@@ -1049,19 +1714,17 @@ class SceneMapper(mp.Process):
                         cur_res_idx = len(optimized_local_window) - 1
             for cam in self.coarse_active_window:
                 if cam.cam_idx not in exist_idx:
-                    if not self.pin_kf_gpu:
-                        cam.to_device(self.device)
+                    self._stage_camera_for_optimization(cam)
                     optimized_local_window.append(cam)
                     used_cams.append(cam)
                     exist_idx.append(cam.cam_idx)
 
-        gt_imgs = torch.stack(
-            [cam.get_gt_image(level) for cam in optimized_local_window]
+        is_initialization_call = bool(
+            not current_view_only
+            and not supplemental
+            and views_override is None
+            and self.initialization_frames == 0
         )
-        gt_depths = torch.stack(
-            [cam.get_sparse_depth(level) for cam in optimized_local_window]
-        )
-
         # Supplemental current-view steps must not consume initialization state.
         if current_view_only or supplemental:
             optimization_steps = max(0, steps)
@@ -1077,8 +1740,97 @@ class SceneMapper(mp.Process):
             if steps >= 0:
                 optimization_steps = steps
 
+        evidence_updates = int(
+            self.gaussians.streaming_appearance_lod_stats.get(
+                "evidence_updates", 0
+            )
+        )
+        budget_config = self.streaming_appearance_lod_config
+        budget_stats = self.tgbr_optimization_budget_stats
+        budget_call = bool(
+            budget_config["optimization_budget_routing_enabled"]
+            and not current_view_only
+            and not supplemental
+            and views_override is None
+            and not is_last_frame
+            and not is_initialization_call
+            and self.progressive_manager is None
+        )
+        budget_ready = bool(
+            budget_call
+            and evidence_updates
+            >= int(budget_config["optimization_budget_warmup_evidence_updates"])
+            and optimization_steps
+            > int(budget_config["optimization_budget_min_steps"])
+        )
+        current_view_losses = []
+        executed_steps = 0
+        if budget_call:
+            budget_stats["optimization_calls"] += 1
+            budget_stats["full_budget_steps"] += int(optimization_steps)
+            if not budget_ready:
+                budget_stats["warmup_calls"] += 1
+        target_fraction = float(
+            self.gaussians.streaming_appearance_lod_stats.get(
+                "current_target_fraction",
+                1.0 if not self.streaming_appearance_lod_config["enabled"] else 0.0,
+            )
+        )
+        use_frequency_schedule = bool(
+            self.streaming_appearance_lod_config["frequency_schedule_enabled"]
+            and not current_view_only
+            and not supplemental
+            and views_override is None
+        )
+        schedule_config = dict(self.streaming_appearance_lod_config)
+        schedule_config["frequency_schedule_enabled"] = use_frequency_schedule
+        step_levels = frequency_consistent_step_levels(
+            optimization_steps,
+            evidence_updates,
+            target_fraction,
+            schedule_config,
+            base_level=level,
+        )
+        local_gt_cache = {}
+        local_depth_cache = {}
+        if use_frequency_schedule:
+            self.tgbr_frequency_schedule_stats["schedule_calls"] += 1
+        compact_view_steps = max(0, int(compact_view_steps))
+        compact_view_count = max(1, int(compact_view_count))
+        compact_start = int(
+            self.streaming_appearance_lod_config[
+                "directional_view_budget_full_anchor_steps"
+            ]
+        )
+        compact_end = min(
+            optimization_steps
+            - int(
+                self.streaming_appearance_lod_config[
+                    "directional_view_budget_full_tail_steps"
+                ]
+            ),
+            compact_start + compact_view_steps,
+        )
+
         for step in range(optimization_steps):
             # t3.record()
+
+            step_level = int(step_levels[step])
+            if step_level not in local_gt_cache:
+                local_gt_cache[step_level] = torch.stack(
+                    [
+                        cam.get_gt_image(step_level)
+                        for cam in optimized_local_window
+                    ]
+                )
+                local_depth_cache[step_level] = torch.stack(
+                    [
+                        cam.get_sparse_depth(step_level)
+                        for cam in optimized_local_window
+                    ]
+                )
+            gt_imgs = local_gt_cache[step_level]
+            gt_depths = local_depth_cache[step_level]
 
             # t1.record()
             global_windows = (
@@ -1090,17 +1842,20 @@ class SceneMapper(mp.Process):
             )
             for cam in global_windows:
                 if cam.cam_idx not in exist_idx:
-                    if not self.pin_kf_gpu:
-                        cam.to_device(self.device)
+                    self._stage_camera_for_optimization(cam)
                     used_cams.append(cam)
                     exist_idx.append(cam.cam_idx)
             global_gt_imgs = (
-                torch.stack([cam.get_gt_image(level) for cam in global_windows])
+                torch.stack(
+                    [cam.get_gt_image(step_level) for cam in global_windows]
+                )
                 if len(global_windows) > 0
                 else []
             )
             global_gt_depths = (
-                torch.stack([cam.get_sparse_depth(level) for cam in global_windows])
+                torch.stack(
+                    [cam.get_sparse_depth(step_level) for cam in global_windows]
+                )
                 if len(global_windows) > 0
                 else []
             )
@@ -1113,6 +1868,7 @@ class SceneMapper(mp.Process):
                 iter_window = optimized_local_window
                 iter_gt_imgs = gt_imgs
                 iter_gt_depths = gt_depths
+            self._record_tgbr_replay_residency(iter_window)
 
             if (
                 self.progressive_manager is not None
@@ -1155,6 +1911,90 @@ class SceneMapper(mp.Process):
                 iter_gt_depths = iter_gt_depths[selected_idx : selected_idx + 1]
                 cur_res_idx = 0
 
+            full_view_count = len(iter_window)
+            is_compact_view_step = (
+                compact_start <= step < compact_end
+                and full_view_count > compact_view_count
+            )
+            if is_compact_view_step:
+                current_idx = next(
+                    (
+                        index
+                        for index, camera in enumerate(iter_window)
+                        if int(camera.cam_idx) == int(self.cur_idx)
+                    ),
+                    None,
+                )
+                global_ids = {
+                    int(camera.cam_idx) for camera in global_windows
+                }
+                if (
+                    self.streaming_appearance_lod_config[
+                        "directional_view_budget_sampling_mode"
+                    ]
+                    == "cyclic_balanced"
+                ):
+                    ordered_indices = list(range(full_view_count))
+                    ordered_indices.sort(
+                        key=lambda index: (
+                            index != current_idx,
+                            int(iter_window[index].cam_idx) not in global_ids,
+                            -int(iter_window[index].cam_idx),
+                        )
+                    )
+                    selected_count = min(compact_view_count, full_view_count)
+                    offset = (
+                        (step - compact_start) * selected_count
+                    ) % full_view_count
+                    selected_indices = [
+                        ordered_indices[(offset + index) % full_view_count]
+                        for index in range(selected_count)
+                    ]
+                elif current_idx is not None:
+                    history_indices = [
+                        index
+                        for index in range(full_view_count)
+                        if index != current_idx
+                    ]
+                    history_indices.sort(
+                        key=lambda index: (
+                            int(iter_window[index].cam_idx) not in global_ids,
+                            -int(iter_window[index].cam_idx),
+                        )
+                    )
+                    selected_indices = [current_idx]
+                    needed = min(compact_view_count - 1, len(history_indices))
+                    if needed:
+                        offset = (step - compact_start) % len(history_indices)
+                        selected_indices.extend(
+                            history_indices[(offset + index) % len(history_indices)]
+                            for index in range(needed)
+                        )
+                else:
+                    selected_indices = []
+                if selected_indices:
+                    iter_window = [iter_window[index] for index in selected_indices]
+                    iter_gt_imgs = iter_gt_imgs[selected_indices]
+                    iter_gt_depths = iter_gt_depths[selected_indices]
+                    cur_res_idx = next(
+                        (
+                            index
+                            for index, camera in enumerate(iter_window)
+                            if int(camera.cam_idx) == int(self.cur_idx)
+                        ),
+                        0,
+                    )
+                else:
+                    is_compact_view_step = False
+
+            if record_directional_view_budget:
+                view_stats = self.tgbr_directional_view_budget_stats
+                view_stats["optimization_steps"] += 1
+                view_stats["full_view_equivalent_views"] += full_view_count
+                view_stats["rendered_views"] += len(iter_window)
+                if is_compact_view_step:
+                    view_stats["compact_steps_executed"] += 1
+
             if self.progressive_manager is not None:
                 self.progressive_manager.configure_optimization_visibility(iter_window)
 
@@ -1164,103 +2004,299 @@ class SceneMapper(mp.Process):
                     cam.set_opt_pose(True)
 
             # t1.record()
-            batch_render_pkg = self.gaussians.render_batch(
-                iter_window,
-                self.use_random_bg,
-                level=level,
-                external_splats=self.get_stable_external_splats(iter_window),
+            budget_check_step = bool(
+                budget_ready
+                and step + 1 >= int(budget_config["optimization_budget_min_steps"])
+                and step < optimization_steps - 1
             )
-            batch_render = batch_render_pkg["render"]
-            batch_render_depth = batch_render_pkg["depth"].squeeze(-1)
-
-            # t1.record()
-            gt_mask = (
-                torch.sum(iter_gt_imgs, dim=-1, keepdim=True) <= 0.0000001
-            ).float()  # ignore invalid pixels in gt
-            iter_gt_imgs = iter_gt_imgs * (1.0 - gt_mask) + batch_render * gt_mask
-
-            # t1.record()
-            if self.normal_reg_loss.normal_reg_weight > 0.0:
-                render_normal = convert_depth_to_normal(
-                    batch_render_depth.view(
-                        batch_render_depth.shape[0],
-                        1,
-                        batch_render_depth.shape[1],
-                        batch_render_depth.shape[2],
+            appearance_probe = (
+                self.streaming_appearance_lod_config["enabled"]
+                and self.streaming_appearance_lod_config["compute_routing"]
+                and self.streaming_appearance_lod_config["selection_mode"]
+                in {"gradient", "gradient_agreement", "gradient_shuffled"}
+                and (step == optimization_steps - 1 or budget_check_step)
+                and not supplemental
+                and any(int(cam.cam_idx) == int(self.cur_idx) for cam in iter_window)
+            )
+            coarse_sh_degree = (
+                int(
+                    self.streaming_appearance_lod_config[
+                        "frequency_schedule_coarse_sh_degree"
+                    ]
+                )
+                if use_frequency_schedule and int(level) == 0 and step_level > 0
+                else None
+            )
+            schedule_stats = self.tgbr_frequency_schedule_stats
+            view_count = len(iter_window)
+            rendered_pixels = (
+                view_count
+                * iter_window[0].get_width(step_level)
+                * iter_window[0].get_height(step_level)
+            )
+            full_pixels = (
+                view_count
+                * iter_window[0].get_width(0)
+                * iter_window[0].get_height(0)
+            )
+            schedule_stats["optimization_steps"] += 1
+            schedule_stats["rendered_views"] += view_count
+            schedule_stats["rendered_pixels"] += rendered_pixels
+            schedule_stats["full_resolution_equivalent_pixels"] += full_pixels
+            schedule_stats["level_steps"][str(step_level)] += 1
+            schedule_stats["level_view_pixels"][str(step_level)] += rendered_pixels
+            if coarse_sh_degree is not None:
+                schedule_stats["base_only_steps"] += 1
+            replay_microbatch_size = self._exact_replay_batch_limit()
+            use_exact_replay = (
+                replay_microbatch_size > 0
+                and len(iter_window) > replay_microbatch_size
+            )
+            observation_projection_info = None
+            exact_current_render_pkg = None
+            if use_exact_replay:
+                (
+                    l1_values,
+                    observation_projection_info,
+                    exact_current_render_pkg,
+                    _,
+                ) = self._exact_replay_microbatch_backward(
+                    iter_window,
+                    iter_gt_imgs,
+                    iter_gt_depths,
+                    step_level,
+                    appearance_probe,
+                    coarse_sh_degree,
+                    cur_res_idx,
+                    capture_current=(
+                        step == optimization_steps - 1 or budget_check_step
                     ),
-                    iter_window[0].get_int_mat(),
+                    microbatch_size=replay_microbatch_size,
                 )
+                batch_render_pkg = None
+                color_mask = None
             else:
-                render_normal = None
-
-            # t1.record()
-            loss_img, l1_values = self.image_loss(batch_render, iter_gt_imgs)
-            loss_depth = self.depth_loss(batch_render_depth, iter_gt_depths)
-            loss_gaussians = self.gaussian_loss(self.gaussians)
-            loss_progressive = (
-                self.progressive_manager.surface_regularization_loss()
-                if self.progressive_manager is not None
-                else 0.0
-            )
-
-            loss_normal_reg, color_mask = self.normal_reg_loss(
-                render_normal, iter_gt_imgs.permute(0, 3, 1, 2)
-            )
-
-            if (
-                "normal" in batch_render_pkg
-                and "normal_from_depth" in batch_render_pkg
-                and "opacity" in batch_render_pkg
-            ):
-                loss_normal = self.normal_loss(
-                    batch_render_pkg["normal"],
-                    batch_render_pkg["normal_from_depth"],
-                    batch_render_pkg["opacity"],
+                batch_render_pkg = self.gaussians.render_batch(
+                    iter_window,
+                    self.use_random_bg,
+                    level=step_level,
+                    external_splats=self.get_stable_external_splats(iter_window),
+                    appearance_probe=appearance_probe,
+                    appearance_sh_degree_override=coarse_sh_degree,
                 )
-            else:
-                loss_normal = 0.0
+                batch_render = geometry_decision_render(batch_render_pkg)
+                batch_render_depth = batch_render_pkg["depth"].squeeze(-1)
 
-            if "distortion" in batch_render_pkg:
-                loss_distortion = self.distortion_loss(batch_render_pkg["distortion"])
-            else:
-                loss_distortion = 0.0
+                # t1.record()
+                gt_mask = (
+                    torch.sum(iter_gt_imgs, dim=-1, keepdim=True) <= 0.0000001
+                ).float()  # ignore invalid pixels in gt
+                iter_gt_imgs = (
+                    iter_gt_imgs * (1.0 - gt_mask) + batch_render * gt_mask
+                )
 
-            loss = (
-                loss_img
-                + loss_gaussians
-                + loss_depth
-                + loss_normal
-                + loss_distortion
-                + loss_normal_reg
-                + loss_progressive
+                # t1.record()
+                if self.normal_reg_loss.normal_reg_weight > 0.0:
+                    render_normal = convert_depth_to_normal(
+                        batch_render_depth.view(
+                            batch_render_depth.shape[0],
+                            1,
+                            batch_render_depth.shape[1],
+                            batch_render_depth.shape[2],
+                        ),
+                        iter_window[0].get_int_mat(step_level),
+                    )
+                else:
+                    render_normal = None
+
+                # t1.record()
+                loss_img, l1_values = self.image_loss(batch_render, iter_gt_imgs)
+                loss_depth = self.depth_loss(batch_render_depth, iter_gt_depths)
+                loss_gaussians = self.gaussian_loss(self.gaussians)
+                loss_progressive = (
+                    self.progressive_manager.surface_regularization_loss()
+                    if self.progressive_manager is not None
+                    else 0.0
+                )
+
+                loss_normal_reg, color_mask = self.normal_reg_loss(
+                    render_normal, iter_gt_imgs.permute(0, 3, 1, 2)
+                )
+
+                if (
+                    "normal" in batch_render_pkg
+                    and "normal_from_depth" in batch_render_pkg
+                    and "opacity" in batch_render_pkg
+                ):
+                    loss_normal = self.normal_loss(
+                        batch_render_pkg["normal"],
+                        batch_render_pkg["normal_from_depth"],
+                        batch_render_pkg["opacity"],
+                    )
+                else:
+                    loss_normal = 0.0
+
+                if "distortion" in batch_render_pkg:
+                    loss_distortion = self.distortion_loss(
+                        batch_render_pkg["distortion"]
+                    )
+                else:
+                    loss_distortion = 0.0
+
+                loss = (
+                    loss_img
+                    + loss_gaussians
+                    + loss_depth
+                    + loss_normal
+                    + loss_distortion
+                    + loss_normal_reg
+                    + loss_progressive
+                )
+                loss.backward()
+                observation_projection_info = batch_render_pkg.get(
+                    "projection_info"
+                )
+
+            current_camera_index = next(
+                (
+                    index
+                    for index, camera in enumerate(iter_window)
+                    if int(camera.cam_idx) == int(self.cur_idx)
+                ),
+                None,
+            )
+            if budget_ready and current_camera_index is not None:
+                current_loss = l1_values[current_camera_index]
+                current_view_losses.append(
+                    current_loss.detach()
+                    if torch.is_tensor(current_loss)
+                    else torch.as_tensor(current_loss, device=self.device)
+                )
+
+            stop_after_step = False
+            collapsed_optimizer_steps = 0
+            collapsed_camera_steps = 0
+            collapsed_gradient_decay = 1.0
+            collapsed_learning_rate_gain = 1.0
+            collapsed_camera_learning_rate_gain = 1.0
+            if budget_check_step:
+                budget_stats["certificate_checks"] += 1
+                if current_camera_index is None or len(current_view_losses) < 3:
+                    certificate = {
+                        "stop": False,
+                        "reason": "invalid_loss",
+                        "relative_tail_bound": float("inf"),
+                        "high_band_gradient_ratio": float("nan"),
+                    }
+                else:
+                    loss_history = torch.stack(current_view_losses[-3:]).float()
+                    loss_history = loss_history.detach().cpu().tolist()
+                    high_band_ratio = (
+                        self.gaussians.streaming_high_band_gradient_ratio()
+                    )
+                    certificate = optimization_tail_certificate(
+                        loss_history,
+                        high_band_ratio,
+                        optimization_steps - step - 1,
+                        budget_config,
+                    )
+                relative_tail = float(certificate["relative_tail_bound"])
+                high_band_ratio = float(
+                    certificate["high_band_gradient_ratio"]
+                )
+                if math.isfinite(relative_tail):
+                    budget_stats["finite_tail_checks"] += 1
+                    budget_stats["relative_tail_bound_sum"] += relative_tail
+                    budget_stats["relative_tail_bound_max"] = max(
+                        float(budget_stats["relative_tail_bound_max"]),
+                        relative_tail,
+                    )
+                if math.isfinite(high_band_ratio):
+                    budget_stats["finite_high_band_checks"] += 1
+                    budget_stats["high_band_gradient_ratio_sum"] += high_band_ratio
+                    budget_stats["high_band_gradient_ratio_max"] = max(
+                        float(budget_stats["high_band_gradient_ratio_max"]),
+                        high_band_ratio,
+                    )
+                stop_after_step = bool(certificate["stop"])
+                if stop_after_step:
+                    budget_stats["certified_calls"] += 1
+                    collapse_mode = budget_config[
+                        "optimization_budget_tail_collapse_mode"
+                    ]
+                    collapse_tail_steps = optimization_steps - step - 1
+                    if collapse_mode in {"replay", "gain"}:
+                        camera_tail_steps = min(
+                            collapse_tail_steps,
+                            max(0, int(self.pose_opt_steps) - step - 1),
+                        )
+                        collapsed_gradient_decay = math.sqrt(
+                            max(0.0, float(certificate["decay_ratio"]))
+                        )
+                    if collapse_mode == "replay":
+                        collapsed_optimizer_steps = collapse_tail_steps
+                        collapsed_camera_steps = camera_tail_steps
+                        budget_stats[
+                            "collapsed_optimizer_steps"
+                        ] += collapsed_optimizer_steps
+                        budget_stats["collapsed_camera_steps"] += collapsed_camera_steps
+                    elif collapse_mode == "gain":
+                        gain_factor = float(
+                            budget_config["optimization_budget_tail_gain_factor"]
+                        )
+                        collapsed_learning_rate_gain = (
+                            1.0 + gain_factor * collapse_tail_steps
+                        )
+                        collapsed_camera_learning_rate_gain = (
+                            1.0 + gain_factor * camera_tail_steps
+                        )
+                        collapsed_camera_steps = 0
+                        budget_stats[
+                            "gain_collapsed_optimizer_steps"
+                        ] += collapse_tail_steps
+                        budget_stats[
+                            "learning_rate_gain_sum"
+                        ] += collapsed_learning_rate_gain
+                        budget_stats[
+                            "gradient_decay_sum"
+                        ] += collapsed_gradient_decay
+                elif certificate["reason"] == "tail_bound":
+                    budget_stats["tail_rejections"] += 1
+                elif certificate["reason"] == "high_band_gradient":
+                    budget_stats["high_band_rejections"] += 1
+                elif certificate["reason"] == "nondecaying_tail":
+                    budget_stats["nondecaying_rejections"] += 1
+                else:
+                    budget_stats["invalid_rejections"] += 1
+
+            effective_last_step = bool(
+                step == optimization_steps - 1 or stop_after_step
             )
 
             # t1.record()
             if len(global_windows) > 0:
-                for cam, err in zip(
-                    iter_window[-self.global_window_size :],
-                    l1_values[-self.global_window_size :],
-                ):
-                    self.kf_graph.update_err(cam.cam_idx, err)
-
-            loss.backward()
+                if is_compact_view_step:
+                    global_ids = {
+                        int(camera.cam_idx) for camera in global_windows
+                    }
+                    for cam, err in zip(iter_window, l1_values):
+                        if int(cam.cam_idx) in global_ids:
+                            self.kf_graph.update_err(cam.cam_idx, err)
+                else:
+                    for cam, err in zip(
+                        iter_window[-self.global_window_size :],
+                        l1_values[-self.global_window_size :],
+                    ):
+                        self.kf_graph.update_err(cam.cam_idx, err)
 
             if (
                 self.streaming_appearance_lod_config["enabled"]
-                and step == optimization_steps - 1
+                and effective_last_step
                 and not supplemental
             ):
-                current_camera_index = next(
-                    (
-                        index
-                        for index, camera in enumerate(iter_window)
-                        if int(camera.cam_idx) == int(self.cur_idx)
-                    ),
-                    None,
-                )
                 if current_camera_index is not None:
                     self.gaussians.observe_streaming_appearance_lod(
-                        batch_render_pkg.get("projection_info"),
+                        observation_projection_info,
                         iter_window,
                         current_camera_index,
                     )
@@ -1281,10 +2317,18 @@ class SceneMapper(mp.Process):
                 ),
             )
 
-            self.gaussians.update()  # Update gaussians, will zero the gradients inside this function
+            self.gaussians.update(
+                replay_steps=collapsed_optimizer_steps,
+                gradient_decay=collapsed_gradient_decay,
+                learning_rate_scale=collapsed_learning_rate_gain,
+            )
 
             if optimize_pose and step < self.pose_opt_steps:
-                self.camera_optimizer.step()  # Update cameras, will zero the gradients inside this function
+                self.camera_optimizer.step(
+                    replay_steps=collapsed_camera_steps,
+                    gradient_decay=collapsed_gradient_decay,
+                    learning_rate_scale=collapsed_camera_learning_rate_gain,
+                )
 
             # t1.record()
             if optimize_pose and step < self.pose_opt_steps:
@@ -1325,42 +2369,70 @@ class SceneMapper(mp.Process):
                         else:
                             self.opt_log["cam_opt_iterations"][cam.name] += 1
 
-            if step == optimization_steps - 1:
-                cur_view_render_pkg = {}
-                cur_view_render_pkg["gt"] = iter_gt_imgs[cur_res_idx]
-                cur_view_render_pkg["sparse_depth"] = optimized_local_window[
-                    cur_res_idx
-                ].get_sparse_depth(level)
-                cur_view_render_pkg["render"] = batch_render_pkg["render"][cur_res_idx]
-                cur_view_render_pkg["opacity"] = batch_render_pkg["opacity"][
-                    cur_res_idx
-                ]
-                if "depth" in batch_render_pkg:
-                    cur_view_render_pkg["depth"] = batch_render_pkg["depth"][
+            executed_steps = step + 1
+            if effective_last_step:
+                if use_exact_replay:
+                    if exact_current_render_pkg is None:
+                        raise RuntimeError(
+                            "Exact replay did not capture the current camera"
+                        )
+                    cur_view_render_pkg = exact_current_render_pkg
+                else:
+                    cur_view_render_pkg = {}
+                    cur_view_render_pkg["gt"] = iter_gt_imgs[cur_res_idx]
+                    cur_view_render_pkg["sparse_depth"] = optimized_local_window[
+                        cur_res_idx
+                    ].get_sparse_depth(step_level)
+                    cur_view_render_pkg["render"] = batch_render_pkg["render"][
                         cur_res_idx
                     ]
-                if "normal" in batch_render_pkg:
-                    cur_view_render_pkg["normal"] = batch_render_pkg["normal"][
+                    cur_view_render_pkg["opacity"] = batch_render_pkg["opacity"][
                         cur_res_idx
                     ]
-                if "normal_from_depth" in batch_render_pkg:
-                    cur_view_render_pkg["normal_from_depth"] = batch_render_pkg[
-                        "normal_from_depth"
-                    ][cur_res_idx]
-                if "distortion" in batch_render_pkg:
-                    cur_view_render_pkg["distortion"] = batch_render_pkg["distortion"][
-                        cur_res_idx
-                    ]
+                    if "depth" in batch_render_pkg:
+                        cur_view_render_pkg["depth"] = batch_render_pkg["depth"][
+                            cur_res_idx
+                        ]
+                    if "normal" in batch_render_pkg:
+                        cur_view_render_pkg["normal"] = batch_render_pkg["normal"][
+                            cur_res_idx
+                        ]
+                    if "normal_from_depth" in batch_render_pkg:
+                        cur_view_render_pkg["normal_from_depth"] = batch_render_pkg[
+                            "normal_from_depth"
+                        ][cur_res_idx]
+                    if "distortion" in batch_render_pkg:
+                        cur_view_render_pkg["distortion"] = batch_render_pkg[
+                            "distortion"
+                        ][cur_res_idx]
 
-                if color_mask is not None:
-                    cur_view_render_pkg["color_mask"] = color_mask[
-                        cur_res_idx
-                    ].unsqueeze(-1)
+                    if color_mask is not None:
+                        cur_view_render_pkg["color_mask"] = color_mask[
+                            cur_res_idx
+                        ].unsqueeze(-1)
+
+            if stop_after_step:
+                saved_steps = optimization_steps - executed_steps
+                budget_stats["saved_steps"] += int(saved_steps)
+                for _ in range(saved_steps):
+                    self.kf_graph.get_and_update_global_window()
+                budget_stats[
+                    "collapsed_replay_scheduler_steps"
+                ] += int(saved_steps)
+                stop_key = str(executed_steps)
+                budget_stats["stop_step_histogram"][stop_key] = (
+                    int(budget_stats["stop_step_histogram"].get(stop_key, 0)) + 1
+                )
+                break
+
+        if budget_call:
+            budget_stats["executed_steps"] += int(executed_steps)
 
         # t1.record()
         if not self.pin_kf_gpu:
             for cam in used_cams:
-                cam.to_device("cpu")
+                if not self._keep_spectral_resident(cam):
+                    cam.to_device("cpu")
 
         if self.pin_kf_gpu and (not is_key_frame):  # do not keep non kfs in gpu
             self.cur_view.to_device("cpu")
@@ -1396,23 +2468,67 @@ class SceneMapper(mp.Process):
             self.frontview_birth_config["enabled"]
             and self.frontview_birth_config["temporal_map_competition"]
         )
+        causal_responsibility_enabled = bool(
+            self.frontview_far_field_config["enabled"]
+            and self.frontview_far_field_config["routing_mode"]
+            in ("causal_observability", "adaptive_observability")
+        )
         reference_count = max(
             int(self.frontview_sampling_config["reference_frames"]),
+            (
+                int(
+                    self.frontview_inverse_depth_certificate_config[
+                        "history_frames"
+                    ]
+                )
+                if self.frontview_inverse_depth_certificate_config["enabled"]
+                else 0
+            ),
             (
                 int(self.frontview_birth_config["temporal_reference_frames"])
                 if temporal_birth_enabled
                 else 0
             ),
+            self.global_window_size if causal_responsibility_enabled else 0,
+            (
+                int(self.causal_metric_birth_config["history_frames"])
+                if self.causal_metric_birth_config["enabled"]
+                else 0
+            ),
         )
-        reference_cameras = [
+        past_reference_cameras = [
             camera
             for camera in self.kf_graph.kf_cameras
             if int(camera.cam_idx) < int(self.cur_view.cam_idx)
-        ][-reference_count:]
-        if not self.frontview_sampling_config["enabled"] and not temporal_birth_enabled:
+        ]
+        reference_cameras = past_reference_cameras[-reference_count:]
+        causal_reference_cameras = None
+        if (
+            self.causal_metric_birth_config["enabled"]
+            and self.current_frame_coverage_recovered
+        ):
+            causal_reference_cameras = (
+                self.gaussians.causal_metric_birth.select_reference_cameras(
+                    self.cur_view, past_reference_cameras
+                )
+            )
+        if (
+            not self.frontview_sampling_config["enabled"]
+            and not self.frontview_inverse_depth_certificate_config["enabled"]
+            and not temporal_birth_enabled
+            and not causal_responsibility_enabled
+            and not self.causal_metric_birth_config["enabled"]
+        ):
             reference_cameras = None
         elif reference_cameras is not None:
-            for reference in reference_cameras:
+            resident_references = {
+                id(reference): reference
+                for reference in (
+                    list(reference_cameras)
+                    + list(causal_reference_cameras or ())
+                )
+            }
+            for reference in resident_references.values():
                 reference.to_device(self.device)
         if self.initialization_frames <= 0:
             with torch.no_grad():
@@ -1423,7 +2539,7 @@ class SceneMapper(mp.Process):
                 )
 
                 rendered_img = (
-                    attemp_cur_render_pkg["render"]
+                    geometry_decision_render(attemp_cur_render_pkg)
                     .unsqueeze(0)
                     .permute(0, 3, 1, 2)
                     .mean(dim=1, keepdims=True)
@@ -1450,6 +2566,21 @@ class SceneMapper(mp.Process):
                 attemp_cur_render_pkg["depth"][
                     attemp_cur_render_pkg["opacity"] < 0.1
                 ] = -1
+                if (
+                    self.causal_dual_responsibility_config["enabled"]
+                    and self.causal_dual_responsibility_config[
+                        "geometry_use_metric_depth"
+                    ]
+                    and "metric_depth" in attemp_cur_render_pkg
+                ):
+                    attemp_cur_render_pkg["metric_depth"][
+                        attemp_cur_render_pkg["metric_opacity"]
+                        < float(
+                            self.causal_dual_responsibility_config[
+                                "minimum_metric_opacity"
+                            ]
+                        )
+                    ] = -1
 
                 # if not self.pin_kf_gpu:
                 #     self.cur_view.to_device("cpu")
@@ -1493,9 +2624,13 @@ class SceneMapper(mp.Process):
                     render_pkg=attemp_cur_render_pkg,
                     level=cur_level,
                     reference_cameras=reference_cameras,
+                    causal_reference_cameras=causal_reference_cameras,
                     coverage_recovery=self.current_frame_coverage_recovered,
                     coverage_recovery_translation_m=(
                         self.current_frame_coverage_recovery_translation_m
+                    ),
+                    coverage_recovery_budget=(
+                        self.current_frame_coverage_recovery_budget
                     ),
                 )
                 if self.current_frame_coverage_recovered:
@@ -1513,9 +2648,13 @@ class SceneMapper(mp.Process):
                         render_pkg=attemp_cur_render_pkg,
                         level=cur_level,
                         reference_cameras=reference_cameras,
+                        causal_reference_cameras=causal_reference_cameras,
                         coverage_recovery=self.current_frame_coverage_recovered,
                         coverage_recovery_translation_m=(
                             self.current_frame_coverage_recovery_translation_m
+                        ),
+                        coverage_recovery_budget=(
+                            self.current_frame_coverage_recovery_budget
                         ),
                     )
                 proposal_ms = (time.perf_counter() - proposal_start) * 1000.0
@@ -1544,8 +2683,16 @@ class SceneMapper(mp.Process):
             self.cur_group_gaussian_frames += 1
 
         if reference_cameras is not None and not self.pin_kf_gpu:
-            for reference in reference_cameras:
-                reference.to_device("cpu")
+            resident_references = {
+                id(reference): reference
+                for reference in (
+                    list(reference_cameras)
+                    + list(causal_reference_cameras or ())
+                )
+            }
+            for reference in resident_references.values():
+                if not self._keep_spectral_resident(reference):
+                    reference.to_device("cpu")
         return attemp_cur_render_pkg
 
     def refine_frontview_coverage_newborns(self):
@@ -1676,16 +2823,53 @@ class SceneMapper(mp.Process):
         stats["sparse_dropout_frames"] += 1
         last = self.kf_graph.last_kf_info
         frame_gap = int(cur_view.cam_idx) - int(last["cam_idx"])
-        if frame_gap < int(config["min_frame_gap"]):
-            return False
-        stats["interval_eligible_frames"] += 1
         current_pose = cur_view.get_raw_pose().detach().cpu().numpy()
         translation, rotation = pose_novelty(last["pose"], current_pose)
-        if (
-            translation < float(config["min_translation_m"])
-            and rotation < float(config["min_rotation_deg"])
-        ):
-            return False
+        debt_measurement = None
+        if config["trigger_mode"] == "projective_debt":
+            if self.coverage_recovery_dropout_pose is None:
+                self.coverage_recovery_dropout_pose = current_pose
+                return False
+            translation, rotation = pose_novelty(
+                self.coverage_recovery_dropout_pose, current_pose
+            )
+            self.coverage_recovery_dropout_pose = current_pose
+            debt_measurement = projective_coverage_debt(
+                translation,
+                rotation,
+                0.5 * (cur_view.get_fx(0) + cur_view.get_fy(0)),
+                self.gaussians.frontview_coverage_depth_prior.estimate(
+                    int(cur_view.cam_idx)
+                ),
+                (cur_view.get_width(0), cur_view.get_height(0)),
+                int(self.gaussians.extra_pts_num),
+            )
+            stats["projective_debt_checks"] += 1
+            stats["projective_debt_sum"] += float(debt_measurement["debt"])
+            self.coverage_recovery_accumulated_debt += float(
+                debt_measurement["debt"]
+            )
+            self.coverage_recovery_accumulated_displacement_px += float(
+                debt_measurement["displacement_px"]
+            )
+            stats["last_projective_debt"] = float(
+                self.coverage_recovery_accumulated_debt
+            )
+            stats["last_projective_displacement_px"] = float(
+                self.coverage_recovery_accumulated_displacement_px
+            )
+            stats["projective_cell_px"] = float(debt_measurement["cell_px"])
+            if self.coverage_recovery_accumulated_debt < 1.0:
+                return False
+        else:
+            if frame_gap < int(config["min_frame_gap"]):
+                return False
+            if (
+                translation < float(config["min_translation_m"])
+                and rotation < float(config["min_rotation_deg"])
+            ):
+                return False
+        stats["interval_eligible_frames"] += 1
         stats["pose_novel_frames"] += 1
         if self.gaussians.get_num_gaussians == 0:
             return False
@@ -1696,10 +2880,15 @@ class SceneMapper(mp.Process):
             last_keyframe_id=int(last["cam_idx"]),
             last_world_to_camera=last["pose"],
             current_world_to_camera=current_pose,
-            rendered=render_pkg["render"],
+            rendered=geometry_decision_render(render_pkg),
             target=cur_view.get_gt_image(0),
             opacity=render_pkg["opacity"],
             config=config,
+            projective_debt=(
+                None
+                if debt_measurement is None
+                else self.coverage_recovery_accumulated_debt
+            ),
         )
         stats["rendered_certificates"] += 1
         stats["failure_fraction_sum"] += certificate["failure_fraction"]
@@ -1712,6 +2901,17 @@ class SceneMapper(mp.Process):
         stats["last_admitted_translation_m"] = float(
             certificate["translation_m"]
         )
+        if debt_measurement is not None:
+            recovery_budget = projective_exposure_budget(
+                (cur_view.get_width(0), cur_view.get_height(0)),
+                int(self.gaussians.extra_pts_num),
+                self.coverage_recovery_accumulated_displacement_px,
+            )
+            self.current_frame_coverage_recovery_budget = int(recovery_budget)
+            stats["projective_exposure_budget_sum"] += int(recovery_budget)
+            stats["last_projective_exposure_budget"] = int(recovery_budget)
+            self.coverage_recovery_accumulated_debt = 0.0
+            self.coverage_recovery_accumulated_displacement_px = 0.0
         stats["last_admitted_frame"] = int(cur_view.cam_idx)
         if stats["first_admitted_frame"] < 0:
             stats["first_admitted_frame"] = int(cur_view.cam_idx)
@@ -1746,6 +2946,15 @@ class SceneMapper(mp.Process):
                 "mean_rotation_deg": (
                     result["rotation_sum_deg"] / checked if checked else None
                 ),
+                "mean_projective_debt": (
+                    result["projective_debt_sum"]
+                    / int(result["projective_debt_checks"])
+                    if int(result["projective_debt_checks"])
+                    else None
+                ),
+                "trigger_mode": self.frontview_coverage_recovery_config[
+                    "trigger_mode"
+                ],
             }
         )
         result.update(self.gaussians.frontview_coverage_recovery_depth_summary())
@@ -1777,11 +2986,21 @@ class SceneMapper(mp.Process):
         # update the number of processed frames
         self.processed_frames += 1
 
+        self._activate_causal_depth_audit(cur_view)
+
         self.gaussians.observe_frontview_raw_pose(cur_view)
+        self.gaussians.observe_causal_landmarks(cur_view)
 
         # prune gaussians
-        if self.prune_interval > 0 and self.processed_frames % self.prune_interval == 0:
+        prune_due = (
+            self.prune_interval > 0
+            and self.processed_frames % self.prune_interval == 0
+        )
+        if prune_due and self._causal_depth_audit_stops_pruning():
+            self.causal_depth_audit_stats["prune_calls_skipped"] += 1
+        elif prune_due:
             self.gaussians.prune_w_opacity(
+                camera=cur_view,
                 current_frame_id=int(cur_view.cam_idx),
                 processed_frames=int(self.processed_frames),
             )
@@ -1791,6 +3010,16 @@ class SceneMapper(mp.Process):
         is_good_frame = self.frame_checker.check(cur_view)
         self.current_frame_coverage_recovered = False
         self.current_frame_coverage_recovery_translation_m = None
+        self.current_frame_coverage_recovery_budget = None
+        if (
+            self.frontview_coverage_recovery_config["trigger_mode"]
+            == "projective_debt"
+            and len(cur_view.get_pts())
+            >= int(self.frame_checker.pts_num_threshold)
+        ):
+            self.coverage_recovery_dropout_pose = None
+            self.coverage_recovery_accumulated_debt = 0.0
+            self.coverage_recovery_accumulated_displacement_px = 0.0
 
         # Preserve every view during the configured high-motion bootstrap window.
         if cur_view.cam_idx <= self.force_keyframes_through_frame:
@@ -1884,6 +3113,56 @@ class SceneMapper(mp.Process):
 
         return False, is_key_frame, get_frame_time, frame_process_time
 
+    def _activate_causal_depth_audit(self, cur_view):
+        config = self.causal_depth_audit_config
+        if (
+            self.causal_depth_audit_active
+            or not config["enabled"]
+            or int(cur_view.cam_idx) < int(config["start_frame"])
+        ):
+            return
+
+        self.causal_depth_audit_active = True
+        stats = self.causal_depth_audit_stats
+        stats["activation_frame"] = int(cur_view.cam_idx)
+        boundary_groups = list(self.gaussians.valid_groups)
+        stats["boundary_groups"] = len(boundary_groups)
+        stats["boundary_gaussians"] = int(self.gaussians.get_num_gaussians)
+        if config["freeze_existing_geometry"]:
+            for group_id in boundary_groups:
+                self.gaussians.freeze_group_geometry(group_id)
+        if config["isolate_future_births"]:
+            self.gaussians.create_new_group(level=0)
+            stats["isolated_group_id"] = int(
+                self.gaussians.current_gaussian_group[0]
+            )
+            self.cur_group_gaussian_frames = 0
+        Log(
+            "Causal depth audit activated at frame {}: stop_birth={} | "
+            "stop_pruning={} | frozen_groups={} | isolated_group={}".format(
+                stats["activation_frame"],
+                config["stop_birth"],
+                config["stop_opacity_pruning"],
+                stats["boundary_groups"]
+                if config["freeze_existing_geometry"]
+                else 0,
+                stats["isolated_group_id"],
+            ),
+            tag="CausalDepthAudit",
+        )
+
+    def _causal_depth_audit_stops_birth(self):
+        return bool(
+            self.causal_depth_audit_active
+            and self.causal_depth_audit_config["stop_birth"]
+        )
+
+    def _causal_depth_audit_stops_pruning(self):
+        return bool(
+            self.causal_depth_audit_active
+            and self.causal_depth_audit_config["stop_opacity_pruning"]
+        )
+
     def camera_refinement(self):
         if len(self.active_window) == 0:
             return
@@ -1923,7 +3202,7 @@ class SceneMapper(mp.Process):
                     optimized_local_window
                 ),
             )
-            batch_render = batch_render_pkg["render"]
+            batch_render = geometry_decision_render(batch_render_pkg)
 
             iter_gt_imgs = gt_imgs * (1.0 - gt_mask) + batch_render * gt_mask
 
@@ -2033,7 +3312,7 @@ class SceneMapper(mp.Process):
                 level=level,
                 external_splats=self.get_stable_external_splats(cameras),
             )
-            render = render_pkg["render"]
+            render = geometry_decision_render(render_pkg)
             invalid = (torch.sum(gt, dim=-1, keepdim=True) <= 1.0e-7).float()
             gt = gt * (1.0 - invalid) + render * invalid
             loss, _ = self.image_loss(render, gt)
@@ -2164,7 +3443,7 @@ class SceneMapper(mp.Process):
                     cam.get_gt_image(),
                     render_pkg["projection_info"],
                     config,
-                    rendered=render_pkg["render"],
+                    rendered=geometry_decision_render(render_pkg),
                 )
                 valid = torch.isfinite(scores) & (gaussian_ids < active_count)
                 candidate_positions = torch.nonzero(valid, as_tuple=False).reshape(-1)
@@ -2469,90 +3748,149 @@ class SceneMapper(mp.Process):
             iter_window = global_windows
             iter_gt_imgs = global_gt_imgs
             iter_gt_depths = global_gt_depths
-
-            batch_render_pkg = self.gaussians.render_batch(
-                iter_window,
-                self.use_random_bg,
-                external_splats=self.get_stable_external_splats(iter_window),
+            self._record_tgbr_replay_residency(iter_window)
+            replay_microbatch_size = self._exact_replay_batch_limit()
+            detail_loss_enabled = any(
+                float(self.post_refinement_config.get(key, 0.0)) > 0.0
+                for key in (
+                    "detail_l1_weight",
+                    "detail_gradient_weight",
+                    "detail_laplacian_fine_weight",
+                    "detail_laplacian_coarse_weight",
+                )
             )
-            batch_render = batch_render_pkg["render"]
-            batch_render_depth = batch_render_pkg["depth"].squeeze(-1)
-
-            gt_mask = (
-                torch.sum(iter_gt_imgs, dim=-1, keepdim=True) <= 0.0000001
-            ).float()  # ignore invalid pixels in gt
-            iter_gt_imgs = iter_gt_imgs * (1.0 - gt_mask) + batch_render * gt_mask
-
-            loss_img, l1_values = self.image_loss(batch_render, iter_gt_imgs)
-            if appearance_mse_start >= 0 and step >= appearance_mse_start:
-                loss_img = blend_mse_tail_loss(
-                    loss_img,
-                    batch_render,
-                    iter_gt_imgs,
-                    appearance_mse_mix,
-                    self.post_refinement_config.get("appearance_mse_scale", 1.0),
+            frequency_error_enabled = (
+                use_all_frames
+                and float(
+                    self.post_refinement_config.get(
+                        "all_frame_frequency_error_weight", 0.0
+                    )
                 )
-            loss_depth = self.depth_loss(batch_render_depth, iter_gt_depths)
-            loss_gaussians = self.gaussian_loss(self.gaussians)
-            detail_loss = (
-                self.post_refinement_detail_loss(
-                    batch_render,
-                    iter_gt_imgs,
-                    batch_render_depth,
-                    batch_render_pkg.get("opacity"),
-                )
-                if step >= detail_loss_start
-                else batch_render.new_zeros(())
+                > 0.0
             )
-            far_structure_loss = batch_render.new_zeros(())
-            if (
-                far_structure_weight > 0.0
-                and step >= far_structure_tail_start
-            ):
-                opacity = batch_render_pkg.get("opacity")
-                far_mask = (
-                    torch.isfinite(batch_render_depth)
-                    & (batch_render_depth > far_structure_depth_m)
+            exact_replay_compatible = not any(
+                (
+                    appearance_mse_start >= 0 and step >= appearance_mse_start,
+                    detail_loss_enabled and step >= detail_loss_start,
+                    far_structure_weight > 0.0
+                    and step >= far_structure_tail_start,
+                    appearance_anchor.config["enabled"],
+                    self.normal_reg_loss.normal_reg_weight > 0.0,
+                    frequency_error_enabled,
                 )
-                if opacity is not None:
-                    far_mask &= opacity.squeeze(-1) > far_structure_opacity
-                far_structure_loss = far_structure_weight * masked_ssim_loss(
-                    batch_render,
+            )
+            use_exact_replay_post = (
+                exact_replay_compatible
+                and replay_microbatch_size > 0
+                and len(iter_window) > replay_microbatch_size
+            )
+            if use_exact_replay_post:
+                l1_values, _, _, replay_loss = self._exact_replay_microbatch_backward(
+                    iter_window,
                     iter_gt_imgs,
-                    far_mask,
+                    iter_gt_depths,
+                    step_level=0,
+                    appearance_probe=False,
+                    coarse_sh_degree=None,
+                    current_index=0,
+                    capture_current=False,
+                    microbatch_size=replay_microbatch_size,
+                    include_progressive_regularization=False,
                 )
-            appearance_anchor_loss = batch_render.new_zeros(())
-            if appearance_anchor.config["enabled"]:
-                appearance_anchor_loss, _ = appearance_anchor.loss(self.gaussians)
-
-            if (
-                "normal" in batch_render_pkg
-                and "normal_from_depth" in batch_render_pkg
-                and "opacity" in batch_render_pkg
-            ):
-                loss_normal = self.normal_loss(
-                    batch_render_pkg["normal"],
-                    batch_render_pkg["normal_from_depth"],
-                    batch_render_pkg["opacity"],
-                )
+                loss = torch.tensor(replay_loss)
+                batch_render_pkg = None
             else:
-                loss_normal = 0.0
+                batch_render_pkg = self.gaussians.render_batch(
+                    iter_window,
+                    self.use_random_bg,
+                    external_splats=self.get_stable_external_splats(iter_window),
+                )
+                batch_render = geometry_decision_render(batch_render_pkg)
+                batch_render_depth = batch_render_pkg["depth"].squeeze(-1)
 
-            if "distortion" in batch_render_pkg:
-                loss_distortion = self.distortion_loss(batch_render_pkg["distortion"])
-            else:
-                loss_distortion = 0.0
+                gt_mask = (
+                    torch.sum(iter_gt_imgs, dim=-1, keepdim=True) <= 0.0000001
+                ).float()  # ignore invalid pixels in gt
+                iter_gt_imgs = (
+                    iter_gt_imgs * (1.0 - gt_mask) + batch_render * gt_mask
+                )
 
-            loss = (
-                loss_img
-                + loss_gaussians
-                + loss_depth
-                + loss_normal
-                + loss_distortion
-                + detail_loss
-                + far_structure_loss
-                + appearance_anchor_loss
-            )
+                loss_img, l1_values = self.image_loss(batch_render, iter_gt_imgs)
+                if appearance_mse_start >= 0 and step >= appearance_mse_start:
+                    loss_img = blend_mse_tail_loss(
+                        loss_img,
+                        batch_render,
+                        iter_gt_imgs,
+                        appearance_mse_mix,
+                        self.post_refinement_config.get(
+                            "appearance_mse_scale", 1.0
+                        ),
+                    )
+                loss_depth = self.depth_loss(batch_render_depth, iter_gt_depths)
+                loss_gaussians = self.gaussian_loss(self.gaussians)
+                detail_loss = (
+                    self.post_refinement_detail_loss(
+                        batch_render,
+                        iter_gt_imgs,
+                        batch_render_depth,
+                        batch_render_pkg.get("opacity"),
+                    )
+                    if step >= detail_loss_start
+                    else batch_render.new_zeros(())
+                )
+                far_structure_loss = batch_render.new_zeros(())
+                if (
+                    far_structure_weight > 0.0
+                    and step >= far_structure_tail_start
+                ):
+                    opacity = batch_render_pkg.get("opacity")
+                    far_mask = (
+                        torch.isfinite(batch_render_depth)
+                        & (batch_render_depth > far_structure_depth_m)
+                    )
+                    if opacity is not None:
+                        far_mask &= opacity.squeeze(-1) > far_structure_opacity
+                    far_structure_loss = far_structure_weight * masked_ssim_loss(
+                        batch_render,
+                        iter_gt_imgs,
+                        far_mask,
+                    )
+                appearance_anchor_loss = batch_render.new_zeros(())
+                if appearance_anchor.config["enabled"]:
+                    appearance_anchor_loss, _ = appearance_anchor.loss(
+                        self.gaussians
+                    )
+
+                if (
+                    "normal" in batch_render_pkg
+                    and "normal_from_depth" in batch_render_pkg
+                    and "opacity" in batch_render_pkg
+                ):
+                    loss_normal = self.normal_loss(
+                        batch_render_pkg["normal"],
+                        batch_render_pkg["normal_from_depth"],
+                        batch_render_pkg["opacity"],
+                    )
+                else:
+                    loss_normal = 0.0
+
+                if "distortion" in batch_render_pkg:
+                    loss_distortion = self.distortion_loss(
+                        batch_render_pkg["distortion"]
+                    )
+                else:
+                    loss_distortion = 0.0
+
+                loss = (
+                    loss_img
+                    + loss_gaussians
+                    + loss_depth
+                    + loss_normal
+                    + loss_distortion
+                    + detail_loss
+                    + far_structure_loss
+                    + appearance_anchor_loss
+                )
 
             for batch_index, (cam, err) in enumerate(zip(iter_window, l1_values)):
                 if cam.cam_idx in self.kf_graph.camIdx_to_kfIdx:
@@ -2581,7 +3919,8 @@ class SceneMapper(mp.Process):
                         0.8 * previous + 0.2 * current_error
                     )
 
-            loss.backward()
+            if not use_exact_replay_post:
+                loss.backward()
 
             self.gaussians.mask_sh_degree_gradients()
             if bool(self.frontview_observability_config["apply_post_refinement"]):
@@ -2649,7 +3988,8 @@ class SceneMapper(mp.Process):
                 for cam in global_windows:
                     if opt_cam:
                         cam.set_opt_pose(False)
-                    cam.to_device("cpu")
+                    if not self._keep_spectral_resident(cam):
+                        cam.to_device("cpu")
 
         for cam in used_cams:
             if opt_cam:
@@ -2700,7 +4040,8 @@ class SceneMapper(mp.Process):
                 camera.get_pose().unsqueeze(0),
             )
             if not self.pin_kf_gpu:
-                camera.to_device("cpu")
+                if not self._keep_spectral_resident(camera):
+                    camera.to_device("cpu")
 
         degrees, stats = evidence.select_degrees(config)
         self.gaussians.configure_sh_degree_masks(
@@ -2915,7 +4256,7 @@ class SceneMapper(mp.Process):
                 self.use_random_bg,
                 external_splats=self.get_stable_external_splats(iter_window),
             )
-            batch_render = batch_render_pkg["render"]
+            batch_render = geometry_decision_render(batch_render_pkg)
             batch_render_depth = batch_render_pkg["depth"].squeeze(-1)
 
             gt_mask = (
@@ -3019,10 +4360,197 @@ class SceneMapper(mp.Process):
         for cam in used_cams:
             cam.to_device("cpu")
 
+    def _scale_mapping_optimizer_learning_rates(self, factor):
+        snapshots = []
+        for group_id in self.gaussians._managed_active_group_ids():
+            group = self.gaussians.gaussian_groups[group_id]
+            for optimizer in group.optimizers.values():
+                for param_group in optimizer.param_groups:
+                    snapshots.append((param_group, float(param_group["lr"])))
+        for optimizer in self.gaussians.progressive_optimizers.values():
+            for param_group in optimizer.param_groups:
+                snapshots.append((param_group, float(param_group["lr"])))
+        if self.camera_optimizer.use_camera_opt:
+            for param_group in self.camera_optimizer.optimizer.param_groups:
+                snapshots.append((param_group, float(param_group["lr"])))
+        for param_group, learning_rate in snapshots:
+            param_group["lr"] = learning_rate * float(factor)
+        return snapshots
+
+    @staticmethod
+    def _restore_mapping_optimizer_learning_rates(snapshots):
+        for param_group, learning_rate in snapshots:
+            param_group["lr"] = learning_rate
+
+    @torch.no_grad()
+    def _tgbr_keyframe_optimization_steps(self, is_last_frame):
+        config = self.streaming_appearance_lod_config
+        if not config["directional_step_budget_enabled"]:
+            return -1
+
+        full_steps = (
+            self.intialization_iters * 2
+            if is_last_frame
+            else self.optimization_iters
+        )
+        current_pose = self.cur_view.get_raw_pose().detach().cpu()
+        sparse_depth = self.cur_view.get_sparse_depth(0).detach()
+        valid_depth = sparse_depth[
+            torch.isfinite(sparse_depth) & (sparse_depth > 0)
+        ]
+        median_depth = (
+            float(torch.median(valid_depth).item())
+            if valid_depth.numel()
+            else float("nan")
+        )
+        if self.tgbr_previous_keyframe_pose is None:
+            novelty = rotation = parallax = float("inf")
+        else:
+            novelty, rotation, parallax = view_direction_novelty_degrees(
+                self.tgbr_previous_keyframe_pose,
+                current_pose,
+                median_depth,
+            )
+
+        stats = self.tgbr_directional_step_budget_stats
+        keyframe_index = int(stats["keyframes"])
+        history = self.tgbr_directional_novelty_history
+        if math.isfinite(novelty) and history:
+            less = sum(value < novelty for value in history)
+            equal = sum(value == novelty for value in history)
+            novelty_percentile = (
+                float(less) + 0.5 * float(equal)
+            ) / float(len(history))
+        else:
+            novelty_percentile = None
+        chosen_steps, category = directional_step_budget(
+            novelty,
+            full_steps,
+            keyframe_index,
+            config,
+            novelty_percentile=novelty_percentile,
+        )
+        if is_last_frame:
+            chosen_steps, category = full_steps, "full"
+
+        stats["keyframes"] += 1
+        stats["{}_keyframes".format(category)] += 1
+        stats["full_budget_steps"] += full_steps
+        stats["executed_steps"] += chosen_steps
+        stats["saved_steps"] += full_steps - chosen_steps
+        if math.isfinite(novelty):
+            stats["finite_novelty_keyframes"] += 1
+            stats["novelty_degrees_sum"] += novelty
+            stats["rotation_degrees_sum"] += rotation
+            stats["parallax_degrees_sum"] += parallax
+            if novelty_percentile is not None:
+                stats["finite_percentile_keyframes"] += 1
+                stats["novelty_percentile_sum"] += novelty_percentile
+            stats["novelty_degrees_min"] = (
+                novelty
+                if stats["novelty_degrees_min"] is None
+                else min(float(stats["novelty_degrees_min"]), novelty)
+            )
+            stats["novelty_degrees_max"] = (
+                novelty
+                if stats["novelty_degrees_max"] is None
+                else max(float(stats["novelty_degrees_max"]), novelty)
+            )
+            history.append(novelty)
+            window = int(config["directional_step_budget_percentile_window"])
+            if len(history) > window:
+                del history[:-window]
+        self.tgbr_previous_keyframe_pose = current_pose
+        return -1 if chosen_steps == full_steps else chosen_steps
+
+    @torch.no_grad()
+    def _tgbr_keyframe_view_budget(self, is_last_frame):
+        config = self.streaming_appearance_lod_config
+        if not config["directional_view_budget_enabled"]:
+            return 0, 0, False
+
+        full_steps = (
+            self.intialization_iters * 2
+            if is_last_frame
+            else self.optimization_iters
+        )
+        current_pose = self.cur_view.get_raw_pose().detach().cpu()
+        sparse_depth = self.cur_view.get_sparse_depth(0).detach()
+        valid_depth = sparse_depth[
+            torch.isfinite(sparse_depth) & (sparse_depth > 0)
+        ]
+        median_depth = (
+            float(torch.median(valid_depth).item())
+            if valid_depth.numel()
+            else float("nan")
+        )
+        if self.tgbr_previous_keyframe_pose is None:
+            novelty = rotation = parallax = float("inf")
+        else:
+            novelty, rotation, parallax = view_direction_novelty_degrees(
+                self.tgbr_previous_keyframe_pose,
+                current_pose,
+                median_depth,
+            )
+
+        stats = self.tgbr_directional_view_budget_stats
+        keyframe_index = int(stats["keyframes"])
+        history = self.tgbr_directional_novelty_history
+        if math.isfinite(novelty) and history:
+            less = sum(value < novelty for value in history)
+            equal = sum(value == novelty for value in history)
+            novelty_percentile = (
+                float(less) + 0.5 * float(equal)
+            ) / float(len(history))
+        else:
+            novelty_percentile = None
+        compact_steps, category = directional_compact_view_steps(
+            novelty,
+            full_steps,
+            keyframe_index,
+            config,
+            novelty_percentile=novelty_percentile,
+        )
+        if is_last_frame:
+            compact_steps, category = 0, "full"
+
+        stats["keyframes"] += 1
+        stats["{}_keyframes".format(category)] += 1
+        stats["compact_steps_requested"] += compact_steps
+        if math.isfinite(novelty):
+            stats["finite_novelty_keyframes"] += 1
+            stats["novelty_degrees_sum"] += novelty
+            stats["rotation_degrees_sum"] += rotation
+            stats["parallax_degrees_sum"] += parallax
+            if novelty_percentile is not None:
+                stats["finite_percentile_keyframes"] += 1
+                stats["novelty_percentile_sum"] += novelty_percentile
+            stats["novelty_degrees_min"] = (
+                novelty
+                if stats["novelty_degrees_min"] is None
+                else min(float(stats["novelty_degrees_min"]), novelty)
+            )
+            stats["novelty_degrees_max"] = (
+                novelty
+                if stats["novelty_degrees_max"] is None
+                else max(float(stats["novelty_degrees_max"]), novelty)
+            )
+            history.append(novelty)
+            window = int(config["directional_view_budget_percentile_window"])
+            if len(history) > window:
+                del history[:-window]
+        self.tgbr_previous_keyframe_pose = current_pose
+        return (
+            compact_steps,
+            int(config["directional_view_budget_compact_views"]),
+            True,
+        )
+
     def run(self):  # Main process of scene mapper
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
         now = torch.cuda.Event(enable_timing=True)
+        online_mapping_wall_start = time.perf_counter()
 
         infos = {
             "fps": 0,
@@ -3042,9 +4570,13 @@ class SceneMapper(mp.Process):
         while True:
             # cur_view_render_pkg = None  # Removed unused variable
 
+            self._cuda_memory_profile_begin()
             is_last_frame, is_key_frame, get_frame_time, frame_process_time = (
                 self.update_kf()
             )
+            if self.cuda_memory_profile_enabled:
+                torch.cuda.synchronize()
+            self._cuda_memory_profile_end("frame_update")
 
             if not is_last_frame:
                 self.opt_log["poses_pair"][self.cur_view.cam_idx] = (
@@ -3057,14 +4589,46 @@ class SceneMapper(mp.Process):
                 LEVEL_VALUE = np.random.choice([0, 1, 2, 3], p=[0.4, 0.3, 0.2, 0.1])
             else:
                 LEVEL_VALUE = 0
-
+            if is_key_frame:
+                self.gaussians.update_dynamic_footprint_trust([self.cur_view])
+            self._cuda_memory_profile_begin()
             start.record()
             if is_key_frame:
-                self.optimize(
-                    is_last_frame=is_last_frame,
-                    is_key_frame=is_key_frame,
-                    level=LEVEL_VALUE,
+                optimization_steps = self._tgbr_keyframe_optimization_steps(
+                    is_last_frame
                 )
+                compact_view_steps, compact_view_count, record_view_budget = (
+                    self._tgbr_keyframe_view_budget(is_last_frame)
+                )
+                learning_rate_snapshots = []
+                if (
+                    optimization_steps > 0
+                    and self.streaming_appearance_lod_config[
+                        "directional_step_budget_lr_compensation"
+                    ]
+                ):
+                    full_steps = self.optimization_iters
+                    lr_scale = float(full_steps) / float(optimization_steps)
+                    learning_rate_snapshots = (
+                        self._scale_mapping_optimizer_learning_rates(lr_scale)
+                    )
+                    step_stats = self.tgbr_directional_step_budget_stats
+                    step_stats["lr_compensated_keyframes"] += 1
+                    step_stats["lr_scale_sum"] += lr_scale
+                try:
+                    self.optimize(
+                        is_last_frame=is_last_frame,
+                        is_key_frame=is_key_frame,
+                        level=LEVEL_VALUE,
+                        steps=optimization_steps,
+                        compact_view_steps=compact_view_steps,
+                        compact_view_count=compact_view_count,
+                        record_directional_view_budget=record_view_budget,
+                    )
+                finally:
+                    self._restore_mapping_optimizer_learning_rates(
+                        learning_rate_snapshots
+                    )
 
             if self.progressive_manager is not None and is_key_frame:
                 self.progressive_manager.constrain_active_surface_scales(
@@ -3076,6 +4640,7 @@ class SceneMapper(mp.Process):
 
             end.record()
             torch.cuda.synchronize()
+            self._cuda_memory_profile_end("optimization")
             map_time = start.elapsed_time(end) / 1000.0
             if self.progressive_manager is not None:
                 self.progressive_runtime["main_optimization_seconds"] += map_time
@@ -3085,6 +4650,7 @@ class SceneMapper(mp.Process):
 
             # after initialization, we add gaussians after the optimization
             # if self.initialization_frames < 0:
+            self._cuda_memory_profile_begin()
             start.record()
             baseline_end = torch.cuda.Event(enable_timing=True)
             stable_end = torch.cuda.Event(enable_timing=True)
@@ -3098,7 +4664,10 @@ class SceneMapper(mp.Process):
                     self.processed_frames
                 )
             )
-            if use_baseline_densification and is_key_frame:
+            stop_audit_birth = self._causal_depth_audit_stops_birth()
+            if stop_audit_birth and use_baseline_densification:
+                self.causal_depth_audit_stats["birth_calls_skipped"] += 1
+            elif use_baseline_densification and is_key_frame:
                 baseline_render_pkg = self.densification(
                     level=LEVEL_VALUE, is_key_frame=True
                 )
@@ -3106,7 +4675,9 @@ class SceneMapper(mp.Process):
             elif use_baseline_densification:
                 self.densification_pts_only()
                 self.refine_frontview_coverage_tracking()
-            self.gaussians.observe_frontview_directional_layer(self.cur_view)
+            self.gaussians.observe_frontview_directional_layer(
+                self.cur_view, render_pkg=baseline_render_pkg
+            )
             baseline_end.record()
             if self.aerocommit_manager is not None:
                 newborn_iters = int(
@@ -3162,7 +4733,7 @@ class SceneMapper(mp.Process):
                     stable_render_pkg["diff"] = torch.mean(
                         torch.abs(
                             self.cur_view.get_gt_image(0)
-                            - stable_render_pkg["render"]
+                            - geometry_decision_render(stable_render_pkg)
                         ),
                         dim=-1,
                     )
@@ -3208,11 +4779,13 @@ class SceneMapper(mp.Process):
                                 cameras=self.cur_view,
                             )
                         )
-                        proxy_render = self.gaussians.render(
-                            self.cur_view,
-                            level=0,
-                            external_splats=visualization_splats,
-                        )["render"]
+                        proxy_render = geometry_decision_render(
+                            self.gaussians.render(
+                                self.cur_view,
+                                level=0,
+                                external_splats=visualization_splats,
+                            )
+                        )
                 self.progressive_manager.save_debug_frame(
                     self.cur_view, proxy_render=proxy_render
                 )
@@ -3260,6 +4833,7 @@ class SceneMapper(mp.Process):
                 debug_end.record()
             end.record()
             torch.cuda.synchronize()
+            self._cuda_memory_profile_end("densification")
             densification_time = start.elapsed_time(end) / 1000.0
             if self.progressive_manager is not None:
                 stage_seconds = {
@@ -3311,7 +4885,9 @@ class SceneMapper(mp.Process):
                 )
 
             if not self.pin_kf_gpu:
-                self.cur_view.to_device("cpu")
+                if not self._keep_spectral_resident(self.cur_view):
+                    self.cur_view.to_device("cpu")
+            self._enforce_spectral_residency()
 
             end.record()
             torch.cuda.synchronize()
@@ -3347,13 +4923,36 @@ class SceneMapper(mp.Process):
                 torch.cuda.memory_allocated(self.device) / (1024**3)
             )
 
+        torch.cuda.synchronize()
+        online_mapping_seconds = time.perf_counter() - online_mapping_wall_start
+        online_stage_export_seconds = 0.0
+        if bool(self.configs["Results"].get("save_online_stage", False)):
+            export_start = time.perf_counter()
+            online_stage_dir = pjoin(
+                self.configs["Results"]["save_dir"], "online_stage"
+            )
+            mkdir_p(online_stage_dir)
+            online_point_cloud_path = pjoin(online_stage_dir, "point_cloud.ply")
+            if self.streaming_appearance_lod_config["sparse_model_export"]:
+                self.gaussians.save_as_tgbr_sparse_ply(online_point_cloud_path)
+            else:
+                self.gaussians.save_as_ply(online_point_cloud_path)
+            if self.frontview_directional_layer_config["enabled"]:
+                self.gaussians.save_frontview_directional_layer(
+                    pjoin(online_stage_dir, DIRECTIONAL_LAYER_FILENAME)
+                )
+            torch.cuda.synchronize()
+            online_stage_export_seconds = time.perf_counter() - export_start
+
         # Post Refinement
+        self._cuda_memory_profile_begin()
         start.record()
         self.post_refinement()
         if self.progressive_manager is not None:
             self.progressive_manager.constrain_active_surface_scales()
         end.record()
         torch.cuda.synchronize()
+        self._cuda_memory_profile_end("post_refinement")
         post_refinement_time = start.elapsed_time(end) / 1000.0
         if self.aerocommit_manager is not None:
             self.aerocommit_runtime["post_refinement_seconds"] = post_refinement_time
@@ -3371,9 +4970,14 @@ class SceneMapper(mp.Process):
             )
 
         # Save the final model and other parameters
-        self.gaussians.save_as_ply(
-            pjoin(self.configs["Results"]["save_dir"], "point_cloud.ply")
+        self._cuda_memory_profile_begin()
+        point_cloud_path = pjoin(
+            self.configs["Results"]["save_dir"], "point_cloud.ply"
         )
+        if self.streaming_appearance_lod_config["sparse_model_export"]:
+            self.gaussians.save_as_tgbr_sparse_ply(point_cloud_path)
+        else:
+            self.gaussians.save_as_ply(point_cloud_path)
         if self.progressive_manager is not None:
             self.progressive_manager.export_full_progressive_map(
                 pjoin(
@@ -3443,12 +5047,29 @@ class SceneMapper(mp.Process):
                 pjoin(self.configs["Results"]["save_dir"], "vignette.png"),
             )
 
+        if self.cuda_memory_profile_enabled:
+            torch.cuda.synchronize()
+        self._cuda_memory_profile_end("final_export")
+
+        self._finalize_tgbr_replay_residency()
+
         # meta info
         meta_info = {}
         meta_info["num_gaussians"] = self.gaussians.get_num_gaussians
         meta_info["num_keyframes"] = self.kf_graph.get_kf_num
         meta_info["num_processed_frames"] = self.processed_frames
         meta_info["kf_ids"] = self.kf_graph.get_kf_cam_idx
+        meta_info["online_mapping_seconds"] = online_mapping_seconds
+        meta_info["online_stage_export_seconds"] = online_stage_export_seconds
+        meta_info["post_refinement_seconds"] = post_refinement_time
+        if self.causal_depth_audit_config["enabled"]:
+            if self.causal_depth_audit_config["audit_opacity_pruning"]:
+                self.causal_depth_audit_stats["opacity_pruning"] = (
+                    self.gaussians.opacity_pruning_audit_summary()
+                )
+            meta_info["causal_depth_audit"] = self.causal_depth_audit_stats
+        if self.cuda_memory_profile_enabled:
+            meta_info["cuda_memory_profile"] = self.cuda_memory_profile_stats
         if self.progressive_manager is not None:
             meta_info["progressive_runtime"] = self.progressive_runtime
         if aerocommit_summary is not None:
@@ -3470,9 +5091,25 @@ class SceneMapper(mp.Process):
             meta_info["frontview_coverage_recovery"] = (
                 self.frontview_coverage_recovery_summary()
             )
+        if self.causal_metric_birth_config["enabled"]:
+            meta_info["causal_metric_birth"] = (
+                self.gaussians.causal_metric_birth_summary()
+            )
+        if self.causal_landmark_memory_config["enabled"]:
+            meta_info["causal_persistent_landmark_memory"] = (
+                self.gaussians.causal_landmark_memory_summary()
+            )
+        if self.causal_dual_responsibility_config["enabled"]:
+            meta_info["causal_dual_responsibility"] = (
+                self.gaussians.causal_dual_responsibility_summary()
+            )
         if self.frontview_sampling_config["enabled"]:
             meta_info["frontview_sampling"] = (
                 self.gaussians.frontview_sampling_summary()
+            )
+        if self.frontview_inverse_depth_certificate_config["enabled"]:
+            meta_info["frontview_inverse_depth_certificate"] = (
+                self.gaussians.frontview_inverse_depth_certificate_summary()
             )
         if self.frontview_depth_transport_config["enabled"]:
             meta_info["frontview_depth_transport"] = (
@@ -3503,6 +5140,188 @@ class SceneMapper(mp.Process):
         if self.streaming_appearance_lod_config["enabled"]:
             meta_info["streaming_appearance_lod"] = (
                 self.gaussians.streaming_appearance_lod_summary()
+            )
+        if self.streaming_appearance_lod_config["frequency_schedule_enabled"]:
+            frequency_stats = dict(self.tgbr_frequency_schedule_stats)
+            frequency_stats["level_steps"] = dict(
+                self.tgbr_frequency_schedule_stats["level_steps"]
+            )
+            frequency_stats["level_view_pixels"] = dict(
+                self.tgbr_frequency_schedule_stats["level_view_pixels"]
+            )
+            full_pixels = int(
+                frequency_stats["full_resolution_equivalent_pixels"]
+            )
+            frequency_stats["pixel_work_reduction_fraction"] = (
+                1.0
+                - float(frequency_stats["rendered_pixels"])
+                / float(full_pixels)
+                if full_pixels
+                else 0.0
+            )
+            meta_info["tgbr_frequency_schedule"] = frequency_stats
+        if self.streaming_appearance_lod_config[
+            "directional_step_budget_enabled"
+        ]:
+            budget_stats = dict(self.tgbr_directional_step_budget_stats)
+            full_steps = int(budget_stats["full_budget_steps"])
+            finite_count = int(budget_stats["finite_novelty_keyframes"])
+            budget_stats["step_reduction_fraction"] = (
+                float(budget_stats["saved_steps"]) / float(full_steps)
+                if full_steps
+                else 0.0
+            )
+            for source, target in (
+                ("novelty_degrees_sum", "mean_novelty_degrees"),
+                ("rotation_degrees_sum", "mean_rotation_degrees"),
+                ("parallax_degrees_sum", "mean_parallax_degrees"),
+            ):
+                budget_stats[target] = (
+                    float(budget_stats[source]) / float(finite_count)
+                    if finite_count
+                    else None
+                )
+            percentile_count = int(budget_stats["finite_percentile_keyframes"])
+            budget_stats["mean_novelty_percentile"] = (
+                float(budget_stats["novelty_percentile_sum"])
+                / float(percentile_count)
+                if percentile_count
+                else None
+            )
+            compensated_count = int(budget_stats["lr_compensated_keyframes"])
+            budget_stats["mean_lr_scale"] = (
+                float(budget_stats["lr_scale_sum"])
+                / float(compensated_count)
+                if compensated_count
+                else None
+            )
+            meta_info["tgbr_directional_step_budget"] = budget_stats
+        if self.streaming_appearance_lod_config[
+            "directional_view_budget_enabled"
+        ]:
+            view_stats = dict(self.tgbr_directional_view_budget_stats)
+            full_views = int(view_stats["full_view_equivalent_views"])
+            finite_count = int(view_stats["finite_novelty_keyframes"])
+            view_stats["view_render_reduction_fraction"] = (
+                1.0 - float(view_stats["rendered_views"]) / float(full_views)
+                if full_views
+                else 0.0
+            )
+            for source, target in (
+                ("novelty_degrees_sum", "mean_novelty_degrees"),
+                ("rotation_degrees_sum", "mean_rotation_degrees"),
+                ("parallax_degrees_sum", "mean_parallax_degrees"),
+            ):
+                view_stats[target] = (
+                    float(view_stats[source]) / float(finite_count)
+                    if finite_count
+                    else None
+                )
+            percentile_count = int(view_stats["finite_percentile_keyframes"])
+            view_stats["mean_novelty_percentile"] = (
+                float(view_stats["novelty_percentile_sum"])
+                / float(percentile_count)
+                if percentile_count
+                else None
+            )
+            meta_info["tgbr_directional_view_budget"] = view_stats
+        if self.streaming_appearance_lod_config[
+            "optimization_budget_routing_enabled"
+        ]:
+            budget_stats = dict(self.tgbr_optimization_budget_stats)
+            budget_stats["stop_step_histogram"] = dict(
+                self.tgbr_optimization_budget_stats["stop_step_histogram"]
+            )
+            full_steps = int(budget_stats["full_budget_steps"])
+            finite_tail_checks = int(budget_stats["finite_tail_checks"])
+            finite_high_band_checks = int(budget_stats["finite_high_band_checks"])
+            calls = int(budget_stats["optimization_calls"])
+            budget_stats["step_reduction_fraction"] = (
+                float(budget_stats["saved_steps"]) / float(full_steps)
+                if full_steps
+                else 0.0
+            )
+            budget_stats["certified_call_fraction"] = (
+                float(budget_stats["certified_calls"]) / float(calls)
+                if calls
+                else 0.0
+            )
+            certified_calls = int(budget_stats["certified_calls"])
+            budget_stats["mean_collapsed_gradient_decay"] = (
+                float(budget_stats["gradient_decay_sum"])
+                / float(certified_calls)
+                if certified_calls
+                else None
+            )
+            budget_stats["mean_learning_rate_gain"] = (
+                float(budget_stats["learning_rate_gain_sum"])
+                / float(certified_calls)
+                if certified_calls
+                else None
+            )
+            budget_stats["mean_relative_tail_bound"] = (
+                float(budget_stats["relative_tail_bound_sum"])
+                / float(finite_tail_checks)
+                if finite_tail_checks
+                else None
+            )
+            budget_stats["mean_high_band_gradient_ratio"] = (
+                float(budget_stats["high_band_gradient_ratio_sum"])
+                / float(finite_high_band_checks)
+                if finite_high_band_checks
+                else None
+            )
+            meta_info["tgbr_optimization_budget"] = budget_stats
+        if (
+            self.streaming_appearance_lod_config["exact_replay_microbatch_size"] > 0
+            or self.streaming_appearance_lod_config["spectral_replay_enabled"]
+        ):
+            replay_stats = dict(self.tgbr_exact_replay_stats)
+            replay_stats["enabled"] = True
+            logical_views = int(replay_stats["logical_views"])
+            render_batches = int(replay_stats["render_batches"])
+            replay_stats["mean_views_per_render_batch"] = (
+                float(logical_views) / float(render_batches)
+                if render_batches
+                else None
+            )
+            meta_info["tgbr_exact_replay"] = replay_stats
+        if self.streaming_appearance_lod_config["spectral_replay_enabled"]:
+            spectral_stats = dict(self.tgbr_spectral_replay_stats)
+            routing_calls = int(spectral_stats["routing_calls"])
+            spectral_stats["mean_active_basis_terms"] = (
+                float(spectral_stats.pop("mean_basis_terms_sum"))
+                / float(routing_calls)
+                if routing_calls
+                else None
+            )
+            spectral_stats["mean_selected_view_limit"] = (
+                float(spectral_stats["selected_view_limit_sum"])
+                / float(routing_calls)
+                if routing_calls
+                else None
+            )
+            meta_info["tgbr_spectral_replay"] = spectral_stats
+        if self.streaming_appearance_lod_config["spectral_residency_enabled"]:
+            residency_stats = dict(self.tgbr_spectral_residency_stats)
+            calls = int(residency_stats["enforcement_calls"])
+            stage_requests = int(residency_stats["stage_requests"])
+            residency_stats["mean_active_basis_terms"] = (
+                float(residency_stats.pop("mean_active_basis_terms_sum"))
+                / float(calls)
+                if calls
+                else None
+            )
+            residency_stats["resident_cache_hit_fraction"] = (
+                float(residency_stats["resident_cache_hits"])
+                / float(stage_requests)
+                if stage_requests
+                else None
+            )
+            meta_info["tgbr_spectral_residency"] = residency_stats
+        if self.tgbr_replay_residency_stats["enabled"]:
+            meta_info["tgbr_replay_residency"] = dict(
+                self.tgbr_replay_residency_stats
             )
         if self.frontview_track_fusion_config["enabled"]:
             meta_info["frontview_track_fusion"] = (

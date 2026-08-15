@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_pfc_floor25_gpu_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-pfh-r0p5-gpu-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-pfc-pfh-r0p5-gpu-200"
+
+FrontViewScaleCover:
+  projected_handoff_enabled: true
+  projected_handoff_radius_px: 0.5

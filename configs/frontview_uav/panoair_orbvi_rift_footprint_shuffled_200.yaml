@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_rift_footprint_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-rift-footprint-shuffled-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-rift-footprint-shuffled-200"
+
+FrontViewIdentityLOD:
+  shuffle_identity: true
+  shuffle_seed: 42

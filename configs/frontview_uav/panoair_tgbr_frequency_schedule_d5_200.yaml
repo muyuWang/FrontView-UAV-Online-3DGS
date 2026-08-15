@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_frequency_schedule_evidence_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-frequency-schedule-d5-200"
+
+Testset:
+  name: "PanoAir-tgbr-frequency-schedule-d5-200"
+
+StreamingAppearanceLOD:
+  frequency_schedule_inactive_gain: 1.25
+  frequency_schedule_min_full_fraction: 0.50

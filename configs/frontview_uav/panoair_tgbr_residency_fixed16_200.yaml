@@ -1,0 +1,14 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_spectral_baseline_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-residency-fixed16-200"
+
+Testset:
+  name: "PanoAir-tgbr-residency-fixed16-200"
+
+StreamingAppearanceLOD:
+  spectral_residency_enabled: true
+  spectral_residency_basis_budget: 1000000.0
+  spectral_residency_max_views: 16
+  spectral_replay_enabled: false
+  bounded_replay_residency_enabled: false

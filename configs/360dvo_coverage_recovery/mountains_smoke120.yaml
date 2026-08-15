@@ -1,0 +1,21 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_pose_contract_v4/mountains_full.yaml
+
+Dataset:
+  name: 360DVO-CoverageRecovery-mountains-smoke120
+  end_cutoff: 645
+
+Testset:
+  name: 360DVO-CoverageRecovery-mountains-smoke120
+  end_cutoff: 645
+
+Results:
+  save_dir: /home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_360dvo_coverage_recovery_8_2
+
+FrontViewCoverageRecovery:
+  enabled: true
+  min_frame_gap: 20
+  min_translation_m: 1.0
+  min_rotation_deg: 3.0
+  residual_threshold: 0.08
+  min_failure_fraction: 0.15
+  opacity_threshold: 0.50

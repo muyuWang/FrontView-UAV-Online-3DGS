@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_pcra_s3_r1p5_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-pcra-s3-r2p5-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-pcra-s3-r2p5-200"
+
+FrontViewResidualCover:
+  covariance_refinement_min_radius_px: 2.5

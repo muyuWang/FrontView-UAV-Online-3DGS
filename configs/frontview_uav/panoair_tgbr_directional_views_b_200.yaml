@@ -1,0 +1,11 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_directional_views_a_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-directional-views-b-200"
+
+Testset:
+  name: "PanoAir-tgbr-directional-views-b-200"
+
+StreamingAppearanceLOD:
+  directional_view_budget_very_low_degrees: 0.75
+  directional_view_budget_low_degrees: 1.50

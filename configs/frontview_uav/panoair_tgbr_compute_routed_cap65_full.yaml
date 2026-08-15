@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_compute_routed_cap60_full.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-compute-routed-cap65-full"
+
+Testset:
+  name: "PanoAir-tgbr-compute-routed-cap65-full"
+
+StreamingAppearanceLOD:
+  max_target_fraction: 0.65

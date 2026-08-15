@@ -10,6 +10,7 @@ import torch
 
 DEFAULT_FRONT_VIEW_COVERAGE_RECOVERY_CONFIG = {
     "enabled": False,
+    "trigger_mode": "fixed_gap",
     "min_frame_gap": 20,
     "min_translation_m": 1.0,
     "min_rotation_deg": 3.0,
@@ -39,6 +40,11 @@ DEFAULT_FRONT_VIEW_COVERAGE_RECOVERY_CONFIG = {
     "depth_fallback_map_min_opacity": 0.50,
     "depth_fallback_map_min_prior_ratio": 0.50,
     "depth_fallback_map_max_prior_ratio": 1.50,
+    "multiview_depth_enabled": False,
+    "multiview_depth_hypotheses": 8,
+    "multiview_depth_mode": "argmax",
+    "shuffle_multiview_depth": False,
+    "multiview_depth_seed": 42,
 }
 
 
@@ -55,6 +61,11 @@ def validate_front_view_coverage_recovery_config(config=None):
         result.update(config)
     if not isinstance(result["enabled"], bool):
         raise TypeError("FrontViewCoverageRecovery.enabled must be boolean")
+    if result["trigger_mode"] not in ("fixed_gap", "projective_debt"):
+        raise ValueError(
+            "FrontViewCoverageRecovery.trigger_mode must be fixed_gap or "
+            "projective_debt"
+        )
     if not isinstance(result["depth_fallback_enabled"], bool):
         raise TypeError(
             "FrontViewCoverageRecovery.depth_fallback_enabled must be boolean"
@@ -71,6 +82,25 @@ def validate_front_view_coverage_recovery_config(config=None):
         raise TypeError(
             "FrontViewCoverageRecovery.newborn_freeze_positions must be boolean"
         )
+    for key in ("multiview_depth_enabled", "shuffle_multiview_depth"):
+        if not isinstance(result[key], bool):
+            raise TypeError(
+                "FrontViewCoverageRecovery.{} must be boolean".format(key)
+            )
+    if result["shuffle_multiview_depth"] and not result[
+        "multiview_depth_enabled"
+    ]:
+        raise ValueError(
+            "Shuffled multiview depth requires multiview depth recovery"
+        )
+    if result["multiview_depth_mode"] not in (
+        "argmax",
+        "posterior_inverse_depth",
+    ):
+        raise ValueError(
+            "FrontViewCoverageRecovery.multiview_depth_mode must be argmax or "
+            "posterior_inverse_depth"
+        )
     if not isinstance(result["min_frame_gap"], int) or result["min_frame_gap"] < 1:
         raise ValueError("FrontViewCoverageRecovery.min_frame_gap must be positive")
     for key in (
@@ -81,10 +111,13 @@ def validate_front_view_coverage_recovery_config(config=None):
         "tracking_update_interval",
         "tracking_optimization_iters",
         "tracking_window_frames",
+        "multiview_depth_hypotheses",
+        "multiview_depth_seed",
     ):
         minimum = 0 if key in (
             "newborn_optimization_iters",
             "tracking_update_interval",
+            "multiview_depth_seed",
         ) else 1
         if not isinstance(result[key], int) or result[key] < minimum:
             raise ValueError(
@@ -95,7 +128,9 @@ def validate_front_view_coverage_recovery_config(config=None):
     for key in ("min_translation_m", "min_rotation_deg"):
         if float(result[key]) < 0.0:
             raise ValueError("FrontViewCoverageRecovery.{} must be non-negative".format(key))
-    if float(result["min_translation_m"]) == 0.0 and float(
+    if result["trigger_mode"] == "fixed_gap" and float(
+        result["min_translation_m"]
+    ) == 0.0 and float(
         result["min_rotation_deg"]
     ) == 0.0:
         raise ValueError("FrontViewCoverageRecovery requires pose novelty")
@@ -151,6 +186,162 @@ def validate_front_view_coverage_recovery_config(config=None):
     return result
 
 
+def projective_coverage_debt(
+    translation_m,
+    rotation_deg,
+    focal_px,
+    reference_depth_m,
+    image_size,
+    birth_budget,
+):
+    """Measure camera motion in budget-derived projective responsibility cells.
+
+    One unit means that a ray has moved by one cell in the image partition whose
+    number of cells equals the per-keyframe birth budget.  Translation uses a
+    conservative far-depth reference; rotation uses its focal-plane chord.
+    """
+
+    translation_m = float(translation_m)
+    rotation_deg = float(rotation_deg)
+    focal_px = float(focal_px)
+    width, height = (int(value) for value in image_size)
+    birth_budget = int(birth_budget)
+    if translation_m < 0.0 or rotation_deg < 0.0 or focal_px <= 0.0:
+        raise ValueError("Projective coverage debt requires valid camera motion")
+    if width <= 0 or height <= 0 or birth_budget <= 0:
+        raise ValueError("Projective coverage debt requires positive image and budget")
+    translation_px = 0.0
+    if reference_depth_m is not None:
+        reference_depth_m = float(reference_depth_m)
+        if not math.isfinite(reference_depth_m) or reference_depth_m <= 0.0:
+            raise ValueError("Projective coverage debt depth must be positive")
+        translation_px = focal_px * translation_m / reference_depth_m
+    angle = math.radians(rotation_deg)
+    rotation_px = 2.0 * focal_px * math.sin(0.5 * min(angle, math.pi))
+    displacement_px = math.hypot(translation_px, rotation_px)
+    cell_px = math.sqrt(float(width * height) / float(birth_budget))
+    return {
+        "debt": displacement_px / cell_px,
+        "displacement_px": displacement_px,
+        "cell_px": cell_px,
+        "translation_px": translation_px,
+        "rotation_px": rotation_px,
+    }
+
+
+def projective_exposure_budget(image_size, birth_budget, displacement_px):
+    """Allocate births to the boundary area newly exposed by image-plane motion."""
+
+    width, height = (int(value) for value in image_size)
+    birth_budget = int(birth_budget)
+    displacement_px = float(displacement_px)
+    if width <= 0 or height <= 0 or birth_budget <= 0:
+        raise ValueError("Projective exposure budget requires positive image and budget")
+    if not math.isfinite(displacement_px) or displacement_px < 0.0:
+        raise ValueError("Projective exposure displacement must be finite and nonnegative")
+    exposed_fraction = min(
+        1.0,
+        displacement_px / float(width) + displacement_px / float(height),
+    )
+    return min(birth_budget, max(1, int(math.ceil(birth_budget * exposed_fraction))))
+
+
+def inverse_depth_hypotheses(observed_depths, count, far_depth_m=None):
+    """Build an online inverse-depth search grid from recent sparse evidence.
+
+    The finite empirical bounds use count-dependent plotting positions, while an
+    optional motion-derived far bound keeps infinity-like structure searchable.
+    """
+
+    count = int(count)
+    if count < 1:
+        raise ValueError("Depth hypothesis count must be positive")
+    values = np.asarray(observed_depths, dtype=np.float64).reshape(-1)
+    values = values[np.isfinite(values) & (values > 0.0)]
+    if len(values) == 0:
+        return np.empty((0,), dtype=np.float32)
+    lower_q = 1.0 / float(count + 1)
+    upper_q = float(count) / float(count + 1)
+    near = float(np.quantile(values, lower_q))
+    far = float(np.quantile(values, upper_q))
+    if far_depth_m is not None:
+        far_depth_m = float(far_depth_m)
+        if not math.isfinite(far_depth_m) or far_depth_m <= 0.0:
+            raise ValueError("Far depth hypothesis bound must be positive")
+        far = max(far, far_depth_m)
+    far = max(far, near)
+    if count == 1 or math.isclose(near, far):
+        return np.asarray([far], dtype=np.float32)
+    inverse = np.linspace(1.0 / near, 1.0 / far, count, dtype=np.float64)
+    return (1.0 / inverse).astype(np.float32)
+
+
+def posterior_inverse_depth_fusion(
+    hypothesis_scores,
+    hypothesis_valid,
+    hypotheses,
+    fallback_depths,
+):
+    """Fuse depth evidence without a hand-selected metric/far threshold.
+
+    Scores define a categorical posterior over an inverse-depth grid.  Normalized
+    entropy measures whether the evidence identifies one depth or remains gauge
+    ambiguous.  Posterior inverse depth is blended with the projective fallback
+    by that concentration, so flat evidence leaves the fallback unchanged.
+    """
+
+    scores = torch.as_tensor(hypothesis_scores).float()
+    valid = torch.as_tensor(hypothesis_valid, device=scores.device).bool()
+    hypotheses = torch.as_tensor(
+        hypotheses, device=scores.device, dtype=scores.dtype
+    ).reshape(-1)
+    fallback = torch.as_tensor(
+        fallback_depths, device=scores.device, dtype=scores.dtype
+    ).reshape(-1)
+    if scores.ndim != 2 or valid.shape != scores.shape:
+        raise ValueError("Posterior depth scores and validity must have shape KxN")
+    if scores.shape[0] != hypotheses.numel() or scores.shape[1] != fallback.numel():
+        raise ValueError("Posterior depth arrays must align")
+    if bool(torch.any(hypotheses <= 0.0)) or bool(torch.any(fallback <= 0.0)):
+        raise ValueError("Posterior and fallback depths must be positive")
+
+    nonnegative = torch.where(valid, torch.clamp(scores, min=0.0), 0.0)
+    mass = nonnegative.sum(dim=0)
+    supported = mass > torch.finfo(scores.dtype).eps
+    probabilities = nonnegative / torch.clamp(
+        mass.unsqueeze(0), min=torch.finfo(scores.dtype).eps
+    )
+    valid_count = valid.sum(dim=0)
+    entropy = -(probabilities * torch.log(torch.clamp(
+        probabilities, min=torch.finfo(scores.dtype).tiny
+    ))).sum(dim=0)
+    normalizer = torch.log(torch.clamp(valid_count.to(scores.dtype), min=2.0))
+    concentration = 1.0 - entropy / normalizer
+    concentration = torch.where(
+        valid_count <= 1,
+        torch.ones_like(concentration),
+        torch.clamp(concentration, 0.0, 1.0),
+    )
+    absolute_support = torch.clamp(nonnegative.max(dim=0).values, 0.0, 1.0)
+    confidence = torch.where(
+        supported,
+        concentration * absolute_support,
+        torch.zeros_like(concentration),
+    )
+
+    posterior_inverse = (
+        probabilities / hypotheses.reshape(-1, 1)
+    ).sum(dim=0)
+    fallback_inverse = 1.0 / fallback
+    fused_inverse = (
+        confidence * posterior_inverse + (1.0 - confidence) * fallback_inverse
+    )
+    fused_depth = 1.0 / torch.clamp(
+        fused_inverse, min=torch.finfo(scores.dtype).tiny
+    )
+    return fused_depth, confidence, supported
+
+
 def motion_conditioned_depth_floor(
     translation_m,
     focal_px,
@@ -179,6 +370,7 @@ class SparseFarDepthPrior:
     def __init__(self, config):
         self.config = validate_front_view_coverage_recovery_config(config)
         self.samples = deque()
+        self.metric_samples = deque()
         self.observed_frames = 0
         self.last_frame_id = 0
 
@@ -186,11 +378,23 @@ class SparseFarDepthPrior:
         oldest = int(frame_id) - int(self.config["depth_prior_window_frames"])
         while self.samples and self.samples[0][0] < oldest:
             self.samples.popleft()
+        while self.metric_samples and self.metric_samples[0][0] < oldest:
+            self.metric_samples.popleft()
 
     def observe(self, frame_id, sparse_depth):
         self.last_frame_id = int(frame_id)
         self._expire(frame_id)
         depth = torch.as_tensor(sparse_depth).detach().reshape(-1).float()
+        metric_valid = torch.isfinite(depth) & (depth > 0.0)
+        if self.config["multiview_depth_enabled"] and bool(
+            metric_valid.any().item()
+        ):
+            self.metric_samples.append(
+                (
+                    int(frame_id),
+                    depth[metric_valid].cpu().numpy().astype(np.float32, copy=False),
+                )
+            )
         valid = (
             torch.isfinite(depth)
             & (depth >= float(self.config["depth_prior_min_m"]))
@@ -205,6 +409,14 @@ class SparseFarDepthPrior:
             self.samples.append((int(frame_id), sample))
             self.observed_frames += 1
         return self.estimate(frame_id)
+
+    def hypotheses(self, frame_id, count, far_depth_m=None):
+        self.last_frame_id = max(self.last_frame_id, int(frame_id))
+        self._expire(frame_id)
+        if not self.metric_samples:
+            return np.empty((0,), dtype=np.float32)
+        values = np.concatenate([sample for _, sample in self.metric_samples])
+        return inverse_depth_hypotheses(values, count, far_depth_m=far_depth_m)
 
     def estimate(self, frame_id):
         self.last_frame_id = max(self.last_frame_id, int(frame_id))
@@ -225,6 +437,9 @@ class SparseFarDepthPrior:
         return {
             "depth_prior_observed_frames": int(self.observed_frames),
             "depth_prior_active_samples": int(len(self.samples)),
+            "depth_hypothesis_active_samples": int(
+                sum(len(sample) for _, sample in self.metric_samples)
+            ),
             "depth_prior_m": self.estimate(self.last_frame_id),
         }
 
@@ -404,6 +619,7 @@ def coverage_recovery_certificate(
     target,
     opacity,
     config,
+    projective_debt=None,
 ):
     """Certify one pose-novel sparse-dropout frame for map recovery."""
 
@@ -411,15 +627,22 @@ def coverage_recovery_certificate(
         last_world_to_camera, current_world_to_camera
     )
     frame_gap = int(frame_id) - int(last_keyframe_id)
-    pose_novel = (
-        translation >= float(config["min_translation_m"])
-        or rotation >= float(config["min_rotation_deg"])
-    )
+    if config["trigger_mode"] == "projective_debt":
+        if projective_debt is None:
+            raise ValueError("Projective-debt recovery requires a debt measurement")
+        trigger_eligible = float(projective_debt) >= 1.0
+        pose_novel = trigger_eligible
+    else:
+        trigger_eligible = frame_gap >= int(config["min_frame_gap"])
+        pose_novel = (
+            translation >= float(config["min_translation_m"])
+            or rotation >= float(config["min_rotation_deg"])
+        )
     measurements = coverage_failure_measurements(
         rendered, target, opacity, config
     )
     admitted = (
-        frame_gap >= int(config["min_frame_gap"])
+        trigger_eligible
         and pose_novel
         and measurements["failure_fraction"]
         >= float(config["min_failure_fraction"])
@@ -431,4 +654,8 @@ def coverage_recovery_certificate(
         "translation_m": translation,
         "rotation_deg": rotation,
         "pose_novel": bool(pose_novel),
+        "trigger_eligible": bool(trigger_eligible),
+        "projective_debt": (
+            None if projective_debt is None else float(projective_debt)
+        ),
     }

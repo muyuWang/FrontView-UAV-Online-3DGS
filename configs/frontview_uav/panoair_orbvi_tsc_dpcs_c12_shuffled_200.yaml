@@ -1,0 +1,10 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_dpcs_c12_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-dpcs-c12-shuffled-200"
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-dpcs-c12-shuffled-200"
+
+FrontViewSampling:
+  shuffle_projective_coverage: true

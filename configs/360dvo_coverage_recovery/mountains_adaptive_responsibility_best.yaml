@@ -1,0 +1,37 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_coverage_recovery/mountains_crr_ablation_base.yaml
+
+Dataset:
+  name: 360DVO-AdaptiveResponsibility-mountains
+
+Testset:
+  name: 360DVO-AdaptiveResponsibility-mountains
+
+Results:
+  save_dir: /home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_mountains_adaptive_responsibility_8_12
+  save_gt: false
+  save_exr: false
+  save_mesh: false
+  skip_eval: true
+
+FrontViewSampling:
+  selection_mode: adaptive_log_depth_random
+
+FrontViewFarField:
+  enabled: true
+  routing_mode: causal_observability
+  map_redundancy_gate: false
+  projective_nms_mode: budget_cells
+  responsibility_basis: source
+
+FrontViewDirectionalLayer:
+  enabled: true
+  anchor_selection_mode: episode_bridge_ward
+  anchor_interval_frames: null
+  max_anchors: 12
+  min_anchors: 2
+  pose_score_mode: rendered_inverse_depth
+  far_depth_m: null
+  use_geometry_gate: false
+  warp_mode: se3_fallback
+  source_fusion: first
+  warp_depth_control: aligned

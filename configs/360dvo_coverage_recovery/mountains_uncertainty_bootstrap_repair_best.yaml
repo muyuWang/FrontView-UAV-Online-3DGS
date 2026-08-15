@@ -1,0 +1,27 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_coverage_recovery/mountains_observability_typed_ownership_best.yaml
+
+Dataset:
+  name: 360DVO-UncertaintyBootstrapRepair-mountains
+
+Testset:
+  name: 360DVO-UncertaintyBootstrapRepair-mountains
+
+Results:
+  save_dir: /home/wmy/workspace_vla/Online-3DGS-Monocular/Logs_mountains_artifact_repair_8_14/online_best
+
+CausalDualResponsibility:
+  finite_depth_certificate_enabled: true
+  finite_depth_certificate_scope: all_unverified
+  finite_depth_pixel_sigma: 1.0
+  finite_depth_preserve_appearance_ownership: true
+
+FrontViewDirectionalLayer:
+  # Keep causal source handoffs below the long Ward segments that caused
+  # visible mountain jumps; single-source transport cannot create afterimages.
+  max_anchors: 96
+  source_fusion: first
+  uncertainty_bootstrap_enabled: true
+  uncertainty_bootstrap_cell_px: 48.0
+  uncertainty_bootstrap_max_anchors: 48
+  uncertainty_bootstrap_blend_weight: 0.75
+  uncertainty_bootstrap_boundary_taper: true

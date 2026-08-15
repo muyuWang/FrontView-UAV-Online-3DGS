@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "scene": "Online3DGS_PanoAir/seq1",
+  "frames": 500,
+  "seed": 42,
+  "best_run": "Logs_worldtest_gs/PanoAir-seq1-worldtest-qg-colmap-500/2026-07-20-15-17-50_worldtest_colmap_true_qg_trust5cm_replay700_v6_seed42_gpu1",
+  "variants": {
+    "v2_identity_fix": {
+      "gaussians": 51265,
+      "psnr": 15.013,
+      "ssim": 0.503,
+      "coverage_percent": 90.745,
+      "frames_400_500_psnr": 12.523,
+      "internal_seconds": 494.14,
+      "wall_seconds": 535.64
+    },
+    "v3_detail_replay": {
+      "gaussians": 77975,
+      "psnr": 16.838596464327583,
+      "ssim": 0.725938910289119,
+      "coverage_percent": 95.2894990234375,
+      "frames_400_500_psnr": 13.09322005414432,
+      "internal_seconds": 452.47,
+      "wall_seconds": 497.97
+    },
+    "v6_permanent_only": {
+      "gaussians": 77979,
+      "certified_roots": 57667,
+      "split_parents": 8192,
+      "inherited_children": 24576,
+      "psnr": 16.8922737940061,
+      "ssim": 0.7282214643435777,
+      "coverage_percent": 95.44338216145835,
+      "frames_400_500_psnr": 13.234738896649398,
+      "internal_seconds": 469.5948125,
+      "wall_seconds": 515.7809382050764,
+      "post_refinement_seconds": 47.81408203125,
+      "future_invalid_rate": 0.0,
+      "certificate_bypass_count": 0
+    },
+    "v6_directional_far_field": {
+      "gaussians": 77979,
+      "psnr": 21.26069897267502,
+      "ssim": 0.7362284862703992,
+      "coverage_percent": 98.71330598958333,
+      "near_side_psnr": 24.0688438892268,
+      "frames_0_200_psnr": 20.623451376626562,
+      "frames_200_300_psnr": 21.456093743298428,
+      "frames_300_400_psnr": 21.43568194601832,
+      "frames_400_500_psnr": 22.164816420805206,
+      "far_field_grid": [256, 512],
+      "minimum_distinct_support_frames": 20,
+      "far_field_is_not_in_ply": true
+    }
+  },
+  "rejected_ablations": {
+    "freeze_committed_means_40": {
+      "psnr": 19.046043172176997,
+      "reason": "0.726 dB below the movable v3 smoke result"
+    },
+    "pose_prepass_200": {
+      "control_psnr": 18.423267394712877,
+      "pose_psnr": 17.952228602306906,
+      "control_ssim": 0.6755169601599897,
+      "pose_ssim": 0.5696571874986757,
+      "extra_pose_seconds": 42.651,
+      "reason": "quality regression and material latency increase"
+    }
+  }
+}

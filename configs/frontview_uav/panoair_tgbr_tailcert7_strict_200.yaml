@@ -1,0 +1,15 @@
+inherit_from: "configs/frontview_uav/panoair_tgbr_compute_dense_200.yaml"
+
+Dataset:
+  name: "PanoAir-tgbr-tailcert7-balanced-200"
+
+Testset:
+  name: "PanoAir-tgbr-tailcert7-balanced-200"
+
+StreamingAppearanceLOD:
+  optimization_budget_routing_enabled: true
+  optimization_budget_min_steps: 7
+  optimization_budget_warmup_evidence_updates: 10
+  optimization_budget_max_relative_tail: 0.01
+  optimization_budget_max_high_band_ratio: 1.25
+  optimization_budget_decay_cap: 0.95

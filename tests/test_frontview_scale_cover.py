@@ -142,6 +142,33 @@ def test_candidate_footprints_give_near_and_far_queries_distinct_radii():
     assert occupied.tolist() == [False, True]
 
 
+def test_gaussian_support_cover_uses_covariance_overlap_without_metric_threshold():
+    cover = FrontViewScaleCover(
+        {
+            "enabled": True,
+            "target_size_mode": "gaussian_support",
+            "distance_mode": "gaussian_overlap",
+            "rebuild_rows": 1,
+        }
+    )
+    sizes = cover.candidate_target_sizes(
+        depths=[10.0, 100.0],
+        focal_pixels=100.0,
+        camera_scale_rescalar=0.25,
+        view_scale_size=0.1,
+        sparse_valid=[False, False],
+        frame_id=0,
+        gaussian_scales=[1.0, 2.0],
+    )
+    assert sizes.tolist() == [1.0, 2.0]
+
+    cover.register([[0.0, 0.0, 0.0]], target_size=[1.0])
+    occupied = cover.occupied(
+        [[1.3, 0.0, 0.0], [1.5, 0.0, 0.0]], target_size=[1.0, 1.0]
+    )
+    assert occupied.tolist() == [True, False]
+
+
 def test_projective_footprints_clamp_ratios_and_shuffle_only_locations():
     config = {
         "enabled": True,

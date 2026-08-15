@@ -1,0 +1,15 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_coverage_recovery/mountains_full.yaml
+
+Dataset:
+  name: 360DVO-CoverageRecoveryNewborn5Cap125-mountains
+
+Testset:
+  name: 360DVO-CoverageRecoveryNewborn5Cap125-mountains
+
+FrontViewCoverageRecovery:
+  newborn_optimization_iters: 5
+  newborn_max_scale_expansion: 1.25
+  newborn_freeze_positions: true
+  depth_fallback_motion_floor_enabled: false
+  depth_fallback_map_enabled: false
+  depth_fallback_scale_multiplier: 10.0

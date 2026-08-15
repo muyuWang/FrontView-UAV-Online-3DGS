@@ -1,0 +1,13 @@
+inherit_from: "configs/frontview_uav/panoair_orbvi_tsc_tgbr75_sh3_200.yaml"
+
+Dataset:
+  name: "PanoAir-frontview-orbvi-tsc-tgbr75-sh3-smoke10"
+  end_cutoff: 462
+
+Testset:
+  name: "PanoAir-frontview-orbvi-tsc-tgbr75-sh3-smoke10"
+  end_cutoff: 462
+
+StreamingAppearanceLOD:
+  min_views: 1
+  promotion_interval: 1

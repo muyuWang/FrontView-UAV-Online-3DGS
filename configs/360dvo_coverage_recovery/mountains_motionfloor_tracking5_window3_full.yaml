@@ -1,0 +1,12 @@
+inherit_from: /home/wmy/workspace_vla/Online-3DGS-Monocular/configs/360dvo_coverage_recovery/mountains_motionfloor_tracking5_full.yaml
+
+Dataset:
+  name: 360DVO-CoverageRecoveryMotionTracking5Window3-mountains
+
+Testset:
+  name: 360DVO-CoverageRecoveryMotionTracking5Window3-mountains
+
+FrontViewCoverageRecovery:
+  tracking_update_interval: 5
+  tracking_optimization_iters: 1
+  tracking_window_frames: 3
